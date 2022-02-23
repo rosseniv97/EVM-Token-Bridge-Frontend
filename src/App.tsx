@@ -13,6 +13,13 @@ import ConnectButton from './components/ConnectButton';
 import { Web3Provider } from '@ethersproject/providers';
 import { getChainData } from './helpers/utilities';
 
+import {
+  US_ELECTION_ADDRESS
+} from './constants';
+import { getContract } from './helpers/ethers';
+
+import US_ELECTION from './constants/abis/USElection.json';
+
 const SLayout = styled.div`
   position: relative;
   width: 100%;
@@ -106,11 +113,14 @@ class App extends React.Component<any, any> {
 
     const address = this.provider.selectedAddress ? this.provider.selectedAddress : this.provider?.accounts[0];
 
+    const electionContract = getContract(US_ELECTION_ADDRESS, US_ELECTION.abi, library, address)
+
     await this.setState({
       library,
       chainId: network.chainId,
       address,
-      connected: true
+      connected: true,
+      electionContract
     });
 
     await this.subscribeToProviderEvents(this.provider);
@@ -183,6 +193,14 @@ class App extends React.Component<any, any> {
 
     this.setState({ ...INITIAL_STATE });
 
+  };
+
+  public currentLeader = async () => {
+    const { electionContract } = this.state;
+
+    const currentLeader = await electionContract.currentLeader();
+
+    await this.setState({ currentLeader });
   };
 
   public render = () => {
