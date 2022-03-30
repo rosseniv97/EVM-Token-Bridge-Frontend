@@ -13,11 +13,14 @@ import ConnectButton from "./components/ConnectButton";
 import { Web3Provider } from "@ethersproject/providers";
 import { getChainData } from "./helpers/utilities";
 
-import { US_ELECTION_ADDRESS } from "./constants";
-import { getContract } from "./helpers/ethers";
+import { LMT_ROUTER_ADDRESS, APT_ROUTER_ADDRESS } from "./constants";
+import { getContract, getSigner } from "./helpers/ethers";
 
-import US_ELECTION from "./constants/abis/USElection.json";
+import APT_ROUTER from "./constants/abis/AppleRouter.json";
+import LMT_ROUTER from "./constants/abis/LimeRouter.json";
+
 import Button from "./components/Button";
+import { Contract } from "ethers";
 
 const SLayout = styled.div`
   position: relative;
@@ -56,29 +59,73 @@ const SBalances = styled(SLanding)`
 
 interface IAppState {
   fetching: boolean;
-  address: string;
-  library: any;
-  connected: boolean;
-  chainId: number;
+  limeChain: {
+    library: any;
+    chainId: number;
+    address: string;
+    connected: boolean;
+    routerContract: Contract;
+  };
+  appleChain: {
+    library: any;
+    chainId: number;
+    address: string;
+    connected: boolean;
+    routerContract: Contract;
+  };
   pendingRequest: boolean;
+  limeToApple: {
+    started: boolean;
+    finished: boolean;
+    receivingWalletAddress: string;
+    senderAddress: string;
+    amount: number;
+  };
+  appleToLime: {
+    started: boolean;
+    finished: boolean;
+    receivingWalletAddress?: string;
+    senderAddress?: string;
+    amount: number;
+  };
   result: any | null;
-  electionContract: any | null;
   info: any | null;
-  currentLeader: any;
   error: any;
 }
 
 const INITIAL_STATE: IAppState = {
   fetching: false,
-  address: "",
-  library: null,
-  connected: false,
-  chainId: 1,
+  limeChain: {
+    library: null,
+    chainId: 1,
+    address: "",
+    connected: true,
+    routerContract: new Contract(LMT_ROUTER_ADDRESS, LMT_ROUTER.abi),
+  },
+  appleChain: {
+    library: null,
+    chainId: 1,
+    address: "",
+    connected: true,
+    routerContract: new Contract(APT_ROUTER_ADDRESS, APT_ROUTER.abi),
+  },
   pendingRequest: false,
+  limeToApple: {
+    started: false,
+    finished: false,
+    receivingWalletAddress: '',
+    senderAddress: '',
+    amount: 0,
+  },
+  appleToLime: {
+    started: false,
+    finished: false,
+    receivingWalletAddress: '',
+    senderAddress: '',
+    amount: 0,
+  },
   result: null,
-  electionContract: null,
   info: null,
-  currentLeader: null,
   error: null,
 };
 
@@ -103,11 +150,12 @@ class App extends React.Component<any, any> {
 
   public componentDidMount() {
     if (this.web3Modal.cachedProvider) {
-      this.onConnect();
+      this.onConnectToLime();
+      this.onConnectToApple();
     }
   }
 
-  public onConnect = async () => {
+  public onConnectToLime = async () => {
     this.provider = await this.web3Modal.connect();
 
     const library = new Web3Provider(this.provider);
@@ -118,23 +166,113 @@ class App extends React.Component<any, any> {
       ? this.provider.selectedAddress
       : this.provider?.accounts[0];
 
-    const electionContract = getContract(
-      US_ELECTION_ADDRESS,
-      US_ELECTION.abi,
+    const LMTRouterContract = getContract(
+      LMT_ROUTER_ADDRESS,
+      LMT_ROUTER.abi,
       library,
       address
     );
 
     await this.setState({
-      library,
-      chainId: network.chainId,
-      address,
-      connected: true,
-      electionContract,
+      limeChain: {
+        library,
+        chainId: network.chainId,
+        address,
+        connected: true,
+        LMTRouterContract,
+      },
     });
 
-    electionContract.on("LogElectionEnded", async (winner) => {
-      await this.setState({ currentLeader: winner });
+    LMTRouterContract.on(
+      "LMTTokenLocked",
+      async (sender, amount, receivingWalletAddress) => {
+        const releaseTx = await this.state.appleChain.routerContract.releaseAmount(
+          amount
+        );
+        const receipt = await releaseTx.wait();
+        await this.setState({
+          limeToApple: {
+            started: true,
+            finished: false,
+            receivingWalletAddress,
+            senderAddress: sender,
+            amount,
+          },
+        });
+      }
+    );
+
+    LMTRouterContract.on(
+      "LMTTokenReleased",
+      async (amount) => {
+        await this.setState({
+          appleToLime: {
+            started: false,
+            finished: true,
+            amount,
+          },
+        });
+      }
+    );
+
+    await this.subscribeToProviderEvents(this.provider);
+  };
+
+  public onConnectToApple = async () => {
+    this.provider = await this.web3Modal.connect();
+
+    const library = new Web3Provider(this.provider);
+
+    const network = await library.getNetwork();
+
+    const address = this.provider.selectedAddress
+      ? this.provider.selectedAddress
+      : this.provider?.accounts[0];
+
+    const APTRouterContract = getContract(
+      APT_ROUTER_ADDRESS,
+      APT_ROUTER.abi,
+      library,
+      address
+    );
+
+    await this.setState({
+      appleChain: {
+        library,
+        chainId: network.chainId,
+        address,
+        connected: true,
+        APTRouterContract,
+      },
+    });
+
+    APTRouterContract.on(
+      "APTTokenLocked",
+      async (sender, amount, receivingWalletAddress) => {
+        const releaseTx = await this.state.limeChain.routerContract.releaseAmount(
+          amount
+        );
+        const receipt = await releaseTx.wait();
+        await this.setState({
+          appleToLime: {
+            started: true,
+            finished: false,
+            receivingWalletAddress,
+            senderAddress: sender,
+            amount,
+          },
+        });
+      }
+    );
+
+    APTRouterContract.on("APTTokenReleased", async (amount) => {
+      await this.setState({
+        appleToLime: {
+          started: true,
+          finished: false,
+          amount,
+        },
+      });
     });
 
     await this.subscribeToProviderEvents(this.provider);
@@ -207,45 +345,8 @@ class App extends React.Component<any, any> {
     this.setState({ ...INITIAL_STATE });
   };
 
-  public currentLeader = async () => {
-    const { electionContract } = this.state;
-
-    const currentLeader = await electionContract.currentLeader();
-
-    await this.setState({ currentLeader });
-  };
-
-  public endElection = async () => {
-    await this.state.electionContract.endElection();
-  };
-
-  public submitElectionResult = async () => {
-    const { electionContract } = this.state;
-    const dataArr = ["Alaska", 10, 80, 24];
-
-    await this.setState({ fetching: true });
-    try {
-      const transaction = await electionContract.submitStateResult(dataArr);
-
-      await this.setState({ transactionHash: transaction.hash });
-
-      const transactionReceipt = await transaction.wait();
-
-      if (transactionReceipt.status !== 1) {
-        await this.setState({ fetching: false, error: true });
-      }
-    } catch (err) {
-      await this.setState({ fetching: false, error: err.message });
-    }
-
-    await this.setState({
-      fetching: false,
-      currentLeader: await this.currentLeader(),
-    });
-  };
-
   public render = () => {
-    const { address, connected, chainId, fetching } = this.state;
+    const { fetching } = this.state;
     return (
       <SLayout>
         <Column maxWidth={1000} spanHeight>
@@ -264,24 +365,21 @@ class App extends React.Component<any, any> {
               </Column>
             ) : (
               <SLanding center>
-                {this.state.connected ? (
+                {!this.state.limeChain.connected || !this.state.appleChain.connected ? (
                   <>
-                    <Button onClick={() => this.currentLeader()}>
-                      Get Current Leader
-                    </Button>
-                    <Button onClick={() => this.submitElectionResult()}>
-                      Submit Result
-                    </Button>
-                    {this.state.currentLeader ? (
-                      <Button onClick={() => this.endElection()}>
-                        End Election
-                      </Button>
-                    ) : (
-                      <></>
-                    )}
+                    <ConnectButton
+                      title="Connect to Lime Account"
+                      onClick={this.onConnectToLime}
+                    />
+                    <ConnectButton
+                      title="Connect to Apple Account"
+                      onClick={this.onConnectToApple}
+                    />
                   </>
                 ) : (
-                  <ConnectButton onClick={this.onConnect} />
+                  <>
+                    
+                  </>
                 )}
                 {this.state.error ? (
                   <div>ERROR submitting transacation</div>
@@ -290,11 +388,7 @@ class App extends React.Component<any, any> {
                 )}
               </SLanding>
             )}
-            {this.state.currentLeader !== null ? (
-              <Wrapper><div>{this.state.currentLeader}</div></Wrapper>
-            ) : (
-              <></>
-            )}
+  
           </SContent>
         </Column>
       </SLayout>
