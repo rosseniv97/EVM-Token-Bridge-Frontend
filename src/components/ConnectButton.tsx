@@ -20,6 +20,7 @@ interface IConnectButtonStyleProps {
 
 interface IConnectButtonProps extends IConnectButtonStyleProps {
   onClick?: any
+  title: string
 }
 
 const SHoverLayer = styled.div`
@@ -124,7 +125,7 @@ const ConnectButton = (props: IConnectButtonProps) => (
     >
       <SHoverLayer />
       <SIcon />
-      {'Connect'}
+      {props.title}
     </SConnectButton>
   </SConnectButtonContainer>
 )

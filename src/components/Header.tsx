@@ -3,7 +3,8 @@ import styled from 'styled-components'
 import * as PropTypes from 'prop-types'
 import Blockie from './Blockie'
 import { ellipseAddress, getChainData } from '../helpers/utilities';
-import { transitions } from '../styles'
+import { transitions } from '../styles';
+import { IChainConn } from "../helpers/types";
 
 const SHeader = styled.div`
   margin-top: -1px;
@@ -72,14 +73,16 @@ const SDisconnect = styled.div<IHeaderStyle>`
 `
 
 interface IHeaderProps {
-  killSession: () => void
+  killSession: (chainConnData: IChainConn) => void
   connected: boolean
-  address: string
-  chainId: number
+  chainConnData: IChainConn
 }
 
 const Header = (props: IHeaderProps) => {
-  const { connected, address, chainId, killSession } = props
+  const { connected, chainConnData, killSession } = props
+  const address = chainConnData.address
+  const chainId = chainConnData.chainId
+  
   const chainData = chainId ? getChainData(chainId) : null
   return (
     <SHeader {...props}>
@@ -93,7 +96,7 @@ const Header = (props: IHeaderProps) => {
         <SActiveAccount>
           <SBlockie address={address} />
           <SAddress connected={connected}>{ellipseAddress(address)}</SAddress>
-          <SDisconnect connected={connected} onClick={killSession}>
+          <SDisconnect connected={connected} onClick={() => killSession(chainConnData)}>
             {'Disconnect'}
           </SDisconnect>
         </SActiveAccount>
