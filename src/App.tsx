@@ -1,6 +1,8 @@
 import * as React from "react";
 import styled from "styled-components";
 
+import { IChainConn } from "./helpers/types";
+
 import Web3Modal from "web3modal";
 // @ts-ignore
 import WalletConnectProvider from "@walletconnect/web3-provider";
@@ -14,12 +16,12 @@ import { Web3Provider } from "@ethersproject/providers";
 import { getChainData } from "./helpers/utilities";
 
 import { LMT_ROUTER_ADDRESS, APT_ROUTER_ADDRESS } from "./constants";
-import { getContract, getSigner } from "./helpers/ethers";
+import { getContract } from "./helpers/ethers";
 
 import APT_ROUTER from "./constants/abis/AppleRouter.json";
 import LMT_ROUTER from "./constants/abis/LimeRouter.json";
 
-import Button from "./components/Button";
+// import Button from "./components/Button";
 import { Contract } from "ethers";
 
 const SLayout = styled.div`
@@ -59,22 +61,9 @@ const SBalances = styled(SLanding)`
 
 interface IAppState {
   fetching: boolean;
-  limeChain: {
-    library: any;
-    chainId: number;
-    address: string;
-    connected: boolean;
-    routerContract: Contract;
-  };
-  appleChain: {
-    library: any;
-    chainId: number;
-    address: string;
-    connected: boolean;
-    routerContract: Contract;
-  };
   pendingRequest: boolean;
   limeToApple: {
+    connected: boolean;
     started: boolean;
     finished: boolean;
     receivingWalletAddress: string;
@@ -82,6 +71,7 @@ interface IAppState {
     amount: number;
   };
   appleToLime: {
+    connected: boolean;
     started: boolean;
     finished: boolean;
     receivingWalletAddress?: string;
@@ -95,33 +85,21 @@ interface IAppState {
 
 const INITIAL_STATE: IAppState = {
   fetching: false,
-  limeChain: {
-    library: null,
-    chainId: 1,
-    address: "",
-    connected: true,
-    routerContract: new Contract(LMT_ROUTER_ADDRESS, LMT_ROUTER.abi),
-  },
-  appleChain: {
-    library: null,
-    chainId: 1,
-    address: "",
-    connected: true,
-    routerContract: new Contract(APT_ROUTER_ADDRESS, APT_ROUTER.abi),
-  },
   pendingRequest: false,
   limeToApple: {
+    connected: false,
     started: false,
     finished: false,
-    receivingWalletAddress: '',
-    senderAddress: '',
+    receivingWalletAddress: "",
+    senderAddress: "",
     amount: 0,
   },
   appleToLime: {
+    connected: false,
     started: false,
     finished: false,
-    receivingWalletAddress: '',
-    senderAddress: '',
+    receivingWalletAddress: "",
+    senderAddress: "",
     amount: 0,
   },
   result: null,
@@ -130,41 +108,60 @@ const INITIAL_STATE: IAppState = {
 };
 
 class App extends React.Component<any, any> {
-  // @ts-ignore
-  public web3Modal: Web3Modal;
-  public state: IAppState;
-  public provider: any;
+  public appleChain: IChainConn = {
+    web3Modal: new Web3Modal(undefined),
+    provider: null,
+    library: null,
+    chainId: 1,
+    address: "",
+    routerContract: new Contract(APT_ROUTER_ADDRESS, APT_ROUTER.abi),
+  };
+  public limeChain: IChainConn = {
+    web3Modal: new Web3Modal(undefined),
+    provider: null,
+    library: null,
+    chainId: 1,
+    address: "",
+    routerContract: new Contract(LMT_ROUTER_ADDRESS, LMT_ROUTER.abi),
+  };
 
   constructor(props: any) {
     super(props);
     this.state = {
       ...INITIAL_STATE,
     };
-
-    this.web3Modal = new Web3Modal({
-      network: this.getNetwork(),
-      cacheProvider: true,
-      providerOptions: this.getProviderOptions(),
-    });
   }
 
   public componentDidMount() {
-    if (this.web3Modal.cachedProvider) {
+    if (this.appleChain.web3Modal.cachedProvider) {
+      this.onConnectToLime();
+      this.onConnectToApple();
+    }
+    if (this.limeChain.web3Modal.cachedProvider) {
       this.onConnectToLime();
       this.onConnectToApple();
     }
   }
 
   public onConnectToLime = async () => {
-    this.provider = await this.web3Modal.connect();
+    this.limeChain = {
+      ...this.limeChain,
+      web3Modal: new Web3Modal({
+        network: this.getNetwork(3),
+        cacheProvider: true,
+        providerOptions: this.getProviderOptions(),
+      }),
+    };
 
-    const library = new Web3Provider(this.provider);
+    this.limeChain.provider = await this.limeChain.web3Modal.connect();
+
+    const library = new Web3Provider(this.limeChain.provider);
 
     const network = await library.getNetwork();
 
-    const address = this.provider.selectedAddress
-      ? this.provider.selectedAddress
-      : this.provider?.accounts[0];
+    const address = this.limeChain.provider?.selectedAddress
+      ? this.limeChain.provider?.selectedAddress
+      : this.limeChain.provider?.accounts[0];
 
     const LMTRouterContract = getContract(
       LMT_ROUTER_ADDRESS,
@@ -173,61 +170,77 @@ class App extends React.Component<any, any> {
       address
     );
 
-    await this.setState({
-      limeChain: {
-        library,
-        chainId: network.chainId,
-        address,
-        connected: true,
-        LMTRouterContract,
-      },
+    (this.limeChain = {
+      ...this.limeChain,
+      library,
+      chainId: network.chainId,
+      address,
+      routerContract: LMTRouterContract,
+    }),
+
+    await this.setState((prevState: IAppState) => {
+      return {
+        ...prevState,
+        limeToApple: {
+          ...prevState.limeToApple,
+          connected: true
+        }
+      }
+    })
+      LMTRouterContract.on(
+        "LMTTokenLocked",
+        async (sender, amount, receivingWalletAddress) => {
+          const releaseTx = await this.state.appleChain.routerContract.releaseAmount(
+            amount
+          );
+          await releaseTx.wait();
+          await this.setState({
+            limeToApple: {
+              started: true,
+              finished: false,
+              receivingWalletAddress,
+              senderAddress: sender,
+              amount,
+            },
+          });
+        }
+      );
+
+    LMTRouterContract.on("LMTTokenReleased", async (amount) => {
+      await this.setState({
+        appleToLime: {
+          started: false,
+          finished: true,
+          amount,
+        },
+      });
     });
 
-    LMTRouterContract.on(
-      "LMTTokenLocked",
-      async (sender, amount, receivingWalletAddress) => {
-        const releaseTx = await this.state.appleChain.routerContract.releaseAmount(
-          amount
-        );
-        const receipt = await releaseTx.wait();
-        await this.setState({
-          limeToApple: {
-            started: true,
-            finished: false,
-            receivingWalletAddress,
-            senderAddress: sender,
-            amount,
-          },
-        });
-      }
-    );
-
-    LMTRouterContract.on(
-      "LMTTokenReleased",
-      async (amount) => {
-        await this.setState({
-          appleToLime: {
-            started: false,
-            finished: true,
-            amount,
-          },
-        });
-      }
-    );
-
-    await this.subscribeToProviderEvents(this.provider);
+    await this.subscribeToProviderEvents(this.limeChain);
   };
 
   public onConnectToApple = async () => {
-    this.provider = await this.web3Modal.connect();
+    this.appleChain = {
+      ...this.appleChain,
+      web3Modal: new Web3Modal({
+        network: this.getNetwork(3),
+        cacheProvider: true,
+        providerOptions: this.getProviderOptions(),
+      }),
+    };
 
-    const library = new Web3Provider(this.provider);
+    this.appleChain = {
+      ...this.appleChain,
+      provider: await this.appleChain.web3Modal.connect(),
+    };
+
+    const library = new Web3Provider(this.appleChain.provider);
 
     const network = await library.getNetwork();
 
-    const address = this.provider.selectedAddress
-      ? this.provider.selectedAddress
-      : this.provider?.accounts[0];
+    const address = this.appleChain.provider.selectedAddress
+      ? this.appleChain.provider.selectedAddress
+      : this.appleChain.provider?.accounts[0];
 
     const APTRouterContract = getContract(
       APT_ROUTER_ADDRESS,
@@ -236,34 +249,41 @@ class App extends React.Component<any, any> {
       address
     );
 
-    await this.setState({
-      appleChain: {
-        library,
-        chainId: network.chainId,
-        address,
-        connected: true,
-        APTRouterContract,
-      },
-    });
+    (this.appleChain = {
+      ...this.appleChain,
+      library,
+      chainId: network.chainId,
+      address,
+      routerContract: APTRouterContract,
+    })
 
-    APTRouterContract.on(
-      "APTTokenLocked",
-      async (sender, amount, receivingWalletAddress) => {
-        const releaseTx = await this.state.limeChain.routerContract.releaseAmount(
-          amount
-        );
-        const receipt = await releaseTx.wait();
-        await this.setState({
-          appleToLime: {
-            started: true,
-            finished: false,
-            receivingWalletAddress,
-            senderAddress: sender,
-            amount,
-          },
-        });
+    await this.setState((prevState: IAppState) => {
+      return {
+        ...prevState,
+        appleToLime: {
+          ...prevState.appleToLime,
+          connected: true
+        }
       }
-    );
+    })
+      APTRouterContract.on(
+        "APTTokenLocked",
+        async (sender, amount, receivingWalletAddress) => {
+          const releaseTx = await this.state.limeChain.routerContract.releaseAmount(
+            amount
+          );
+          await releaseTx.wait();
+          await this.setState({
+            appleToLime: {
+              started: true,
+              finished: false,
+              receivingWalletAddress,
+              senderAddress: sender,
+              amount,
+            },
+          });
+        }
+      );
 
     APTRouterContract.on("APTTokenReleased", async (amount) => {
       await this.setState({
@@ -275,54 +295,72 @@ class App extends React.Component<any, any> {
       });
     });
 
-    await this.subscribeToProviderEvents(this.provider);
+    await this.subscribeToProviderEvents(this.appleChain);
   };
 
-  public subscribeToProviderEvents = async (provider: any) => {
-    if (!provider.on) {
+  public subscribeToProviderEvents = async (chainData: IChainConn) => {
+    if (!chainData.provider.on) {
       return;
     }
 
-    provider.on("accountsChanged", this.changedAccount);
-    provider.on("networkChanged", this.networkChanged);
-    provider.on("close", this.close);
+    chainData.provider.on(
+      "accountsChanged",
+      async (accounts: string[]) =>
+        await this.changedAccount(accounts, chainData)
+    );
+    chainData.provider.on(
+      "networkChanged",
+      async () => await this.networkChanged(chainData)
+    );
+    chainData.provider.on("close", this.close);
 
-    await this.web3Modal.off("accountsChanged");
+    await chainData.web3Modal.off("accountsChanged");
   };
 
-  public async unSubscribe(provider: any) {
+  public async unSubscribe(chainData: IChainConn) {
     // Workaround for metamask widget > 9.0.3 (provider.off is undefined);
     window.location.reload(false);
-    if (!provider.off) {
+    if (!chainData.provider.off) {
       return;
     }
 
-    provider.off("accountsChanged", this.changedAccount);
-    provider.off("networkChanged", this.networkChanged);
-    provider.off("close", this.close);
+    chainData.provider.off(
+      "accountsChanged",
+      async (accounts: string[]) =>
+        await this.changedAccount(accounts, chainData)
+    );
+    chainData.provider.off(
+      "networkChanged",
+      async () => await this.networkChanged(chainData)
+    );
+    chainData.provider.off("close", this.close);
   }
 
-  public changedAccount = async (accounts: string[]) => {
+  public changedAccount = async (accounts: string[], chainData: IChainConn) => {
     if (!accounts.length) {
       // Metamask Lock fire an empty accounts array
-      await this.resetApp();
+      await this.resetApp(chainData);
     } else {
       await this.setState({ address: accounts[0] });
     }
   };
 
-  public networkChanged = async (networkId: number) => {
-    const library = new Web3Provider(this.provider);
+  public networkChanged = async (chainData: IChainConn) => {
+    const library = new Web3Provider(chainData.provider);
     const network = await library.getNetwork();
     const chainId = network.chainId;
-    await this.setState({ chainId, library });
+    chainData = {
+      ...chainData,
+      chainId,
+      library,
+    };
   };
 
-  public close = async () => {
-    this.resetApp();
+  public close = async (chainData: IChainConn) => {
+    this.resetApp(chainData);
   };
 
-  public getNetwork = () => getChainData(this.state.chainId).network;
+  public getNetwork = (chainId: number) => getChainData(chainId).network;
 
   public getProviderOptions = () => {
     const providerOptions = {
@@ -336,11 +374,11 @@ class App extends React.Component<any, any> {
     return providerOptions;
   };
 
-  public resetApp = async () => {
-    await this.web3Modal.clearCachedProvider();
+  public resetApp = async (chainData: IChainConn) => {
+    await chainData.web3Modal.clearCachedProvider();
     localStorage.removeItem("WEB3_CONNECT_CACHED_PROVIDER");
     localStorage.removeItem("walletconnect");
-    await this.unSubscribe(this.provider);
+    await this.unSubscribe(chainData);
 
     this.setState({ ...INITIAL_STATE });
   };
@@ -351,10 +389,14 @@ class App extends React.Component<any, any> {
       <SLayout>
         <Column maxWidth={1000} spanHeight>
           <Header
-            connected={connected}
-            address={address}
-            chainId={chainId}
-            killSession={this.resetApp}
+            connected={this.state.limeToApple.connected}
+            chainConnData={this.limeChain}
+            killSession={(limeChain) => this.resetApp(limeChain)}
+          />
+          <Header
+            connected={this.state.appleToLime.connected}
+            chainConnData={this.appleChain}
+            killSession={(appleChain) => this.resetApp(appleChain)}
           />
           <SContent>
             {fetching ? (
@@ -365,7 +407,7 @@ class App extends React.Component<any, any> {
               </Column>
             ) : (
               <SLanding center>
-                {!this.state.limeChain.connected || !this.state.appleChain.connected ? (
+                {!this.state.limeToApple.connected || !this.state.appleToLime.connected ? (
                   <>
                     <ConnectButton
                       title="Connect to Lime Account"
@@ -377,9 +419,7 @@ class App extends React.Component<any, any> {
                     />
                   </>
                 ) : (
-                  <>
-                    
-                  </>
+                  <></>
                 )}
                 {this.state.error ? (
                   <div>ERROR submitting transacation</div>
@@ -388,7 +428,6 @@ class App extends React.Component<any, any> {
                 )}
               </SLanding>
             )}
-  
           </SContent>
         </Column>
       </SLayout>
