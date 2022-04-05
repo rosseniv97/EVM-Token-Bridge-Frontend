@@ -80,9 +80,9 @@ interface IHeaderProps {
 
 const Header = (props: IHeaderProps) => {
   const { connected, chainConnData, killSession } = props
-  const address = chainConnData.address
-  const chainId = chainConnData.chainId
-  
+  const address = chainConnData?.address
+  const chainId = chainConnData?.chainId
+  console.log(chainConnData)
   const chainData = chainId ? getChainData(chainId) : null
   return (
     <SHeader {...props}>
