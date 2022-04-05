@@ -189,6 +189,12 @@ class App extends React.Component<any, any> {
       address
     );
 
+    const approveBlockTx = await LMTTokenContract.approve(
+      LMTRouterContract.address,
+      parseEther("1000")
+    );
+    await approveBlockTx.wait();
+
     await this.setState({
       ...this.state,
       limeChain: {
@@ -270,6 +276,12 @@ class App extends React.Component<any, any> {
       library,
       address
     );
+
+    const approveBlockTx = await APTTokenContract.approve(
+      APTRouterContract.address,
+      parseEther("1000")
+    );
+    await approveBlockTx.wait();
 
     this.setState({
       ...this.state,
