@@ -28,4 +28,6 @@ export interface IChainConn {
   chainId: number;
   address: string;
   routerContract: Contract;
+  tokenContract: Contract;
+  connected: boolean;
 }
