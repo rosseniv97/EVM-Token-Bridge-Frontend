@@ -27,7 +27,8 @@ export interface IChainConn {
   library: any;
   chainId: number;
   address: string;
-  routerContract: Contract;
-  tokenContract: Contract;
+  sourceRouterContract: Contract;
+  sourceTokenContract: Contract;
+  targetRouterContract: Contract;
   connected: boolean;
 }
