@@ -73,7 +73,7 @@ const SDisconnect = styled.div<IHeaderStyle>`
 `
 
 interface IHeaderProps {
-  killSession: (chainConnData: IChainConn) => void
+  killSession: () => void
   connected: boolean
   chainConnData: IChainConn
 }
@@ -82,7 +82,7 @@ const Header = (props: IHeaderProps) => {
   const { connected, chainConnData, killSession } = props
   const address = chainConnData?.address
   const chainId = chainConnData?.chainId
-  console.log(chainConnData)
+
   const chainData = chainId ? getChainData(chainId) : null
   return (
     <SHeader {...props}>
@@ -96,7 +96,7 @@ const Header = (props: IHeaderProps) => {
         <SActiveAccount>
           <SBlockie address={address} />
           <SAddress connected={connected}>{ellipseAddress(address)}</SAddress>
-          <SDisconnect connected={connected} onClick={() => killSession(chainConnData)}>
+          <SDisconnect connected={connected} onClick={() => killSession()}>
             {'Disconnect'}
           </SDisconnect>
         </SActiveAccount>

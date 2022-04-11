@@ -118,6 +118,7 @@ class App extends React.Component<any, any> {
   }
 
   public onConnect = async () => {
+    await this.setState({fetching: true}) 
     await this.setState({
       chainConnection: {
         ...this.state.chainConnection,
@@ -189,8 +190,7 @@ class App extends React.Component<any, any> {
       sourceTokenAbi,
       library,
       address
-    );
-
+    ); 
     const approveRouterTx = await sourceTokenContract.approve(
       sourceRouterContract.address,
       parseEther("1000")
@@ -212,13 +212,18 @@ class App extends React.Component<any, any> {
     });
 
     sourceRouterContract.on(
-      "LMTTokenLocked",
+      "TokenLocked",
       async (sender, amount, receivingWalletAddress) => {
         const userLockedAmount = await sourceRouterContract.userToLocked(
           sender,
           sourceTokenAddress
         );
-        await this.setState({ claimable: { amount: userLockedAmount } });
+
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x3' }], // chainId must be in hexadecimal numbers
+        });
+        await this.setState({ claimable: { amount: formatEther(userLockedAmount) } });
 
         await this.setState({
           chainConnection: {
@@ -232,7 +237,7 @@ class App extends React.Component<any, any> {
           },
         });
 
-        const provider = await this.state.chainConnection.web3Modal.connect();
+        const provider = await this.state.chainConnection.web3Modal.connect(); 
 
         const library = new Web3Provider(provider);
 
@@ -252,7 +257,7 @@ class App extends React.Component<any, any> {
         });
       }
     );
-
+    await this.setState({fetching: false})    
     // LMTRouterContract.on("LMTTokenReleased", async (amount) => {
     //   await this.setState({
     //     appleToLime: {
@@ -326,8 +331,10 @@ class App extends React.Component<any, any> {
   }
 
   public async claim() {
+    console.log(this.state.chainConnection.targetRouterContract.address)
     await this.setState({ fetching: true });
-    try {const claimTx = await this.state.targetRouterContract.claim(
+    try {
+      const claimTx = await this.state.chainConnection.targetRouterContract.claim(
       this.state.chainConnection.address,
       this.state.chainConnection.sourceTokenContract.address,
       parseEther(this.state.claimable.claimed)
@@ -395,12 +402,7 @@ class App extends React.Component<any, any> {
           <Header
             connected={this.state.chainConnection.connected}
             chainConnData={this.state.chainConnection}
-            killSession={(chainConnection) => this.resetApp(chainConnection)}
-          />
-          <Header
-            connected={this.state.appleChain.connected}
-            chainConnData={this.state.appleChain}
-            killSession={(appleChain) => this.resetApp(appleChain)}
+            killSession={() => this.resetApp(this.state.chainConnection)}
           />
           <SContent>
             {fetching ? (
@@ -463,7 +465,7 @@ class App extends React.Component<any, any> {
                           });
 
                           const balanceLime = formatEther(
-                            await this.state.chainConnection.tokenContract.balanceOf(
+                            await this.state.chainConnection.sourceTokenContract.balanceOf(
                               this.state.chainConnection.address
                             )
                           );
