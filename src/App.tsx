@@ -20,8 +20,7 @@ import { getChainData } from "./helpers/utilities";
 import contracts from "./constants/contracts";
 import { getContract } from "./helpers/ethers";
 
-import APT_ROUTER from "./constants/abis/AppleRouter.json";
-import LMT_ROUTER from "./constants/abis/LimeRouter.json";
+import ROUTER from "./constants/abis/Router.json";
 import APT_TOKEN from "./constants/abis/APT.json";
 import LMT_TOKEN from "./constants/abis/LMT.json";
 
@@ -67,16 +66,10 @@ const SBalances = styled(SLanding)`
 interface IAppState {
   fetching: boolean;
   pendingRequest: boolean;
-  appleChain: IChainConn;
-  limeChain: IChainConn;
-  limeToApple: {
-    toBeExecuted: boolean;
-    executed: boolean;
-  };
-  appleToLime: {
-    toBeExecuted: boolean;
-    executed: boolean;
-  };
+  chainConnection: IChainConn;
+  sourceToTarget: any;
+  claimable: any;
+  sourceInput: string;
   result: any | null;
   info: any | null;
   error: any;
@@ -85,46 +78,26 @@ interface IAppState {
 const INITIAL_STATE: IAppState = {
   fetching: false,
   pendingRequest: false,
-  appleChain: {
+  chainConnection: {
     web3Modal: new Web3Modal(undefined),
     provider: null,
     library: null,
     chainId: -1,
     address: "",
-    routerContract: new Contract(
-      contracts.testnet.APT_ROUTER.address,
-      APT_ROUTER.abi
-    ),
-    tokenContract: new Contract(
-      contracts.testnet.APT_TOKEN.address,
-      APT_TOKEN.abi
-    ),
-    connected: false
+    sourceRouterContract: new Contract(contracts.LMT_ROUTER.address, ROUTER.abi),
+    sourceTokenContract: new Contract(contracts.LMT_TOKEN.address, ROUTER.abi),
+    targetRouterContract: new Contract(contracts.APT_ROUTER.address, ROUTER.abi),
+    connected: false,
   },
-  limeChain: {
-    web3Modal: new Web3Modal(undefined),
-    provider: null,
-    library: null,
-    chainId: -1,
-    address: "",
-    routerContract: new Contract(
-      contracts.testnet.LMT_ROUTER.address,
-      LMT_ROUTER.abi
-    ),
-    tokenContract: new Contract(
-      contracts.testnet.LMT_TOKEN.address,
-      LMT_TOKEN.abi
-    ),
-    connected: false
+  sourceToTarget: {
+    source: "lime",
+    target: "apple",
   },
-  limeToApple: {
-    toBeExecuted: true,
-    executed: false,
+  claimable: {
+    amount: 0,
+    claimed: 0,
   },
-  appleToLime: {
-    toBeExecuted: false,
-    executed: false,
-  },
+  sourceInput: "",
   result: null,
   info: null,
   error: null,
@@ -140,20 +113,15 @@ class App extends React.Component<any, any> {
 
   public componentDidMount() {
     if (this.state.appleChain?.web3Modal.cachedProvider) {
-      this.onConnectToLime();
-      this.onConnectToApple();
-    }
-    if (this.state.limeChain?.web3Modal.cachedProvider) {
-      this.onConnectToLime();
-      this.onConnectToApple();
+      this.onConnect();
     }
   }
 
-  public onConnectToLime = async () => {
+  public onConnect = async () => {
+    await this.setState({fetching: true}) 
     await this.setState({
-      ...this.state,
-      limeChain: {
-        ...this.state.limeChain,
+      chainConnection: {
+        ...this.state.chainConnection,
         chainId: 4,
         web3Modal: new Web3Modal({
           network: this.getNetwork(4),
@@ -163,154 +131,143 @@ class App extends React.Component<any, any> {
       },
     });
 
-    this.state.limeChain.provider = await this.state.limeChain.web3Modal.connect();
+    const provider = await this.state.chainConnection.web3Modal.connect();
 
-    const library = new Web3Provider(this.state.limeChain.provider);
-
-    const signerAddress = await library.getSigner().getAddress();
-
-    const network = await library.getNetwork();
-
-    const address = this.state.limeChain.provider?.selectedAddress
-      ? this.state.limeChain.provider?.selectedAddress
-      : this.state.limeChain.provider?.accounts[0];
-
-    const LMTRouterContract = getContract(
-      contracts.testnet.LMT_ROUTER.address,
-      LMT_ROUTER.abi,
-      library,
-      address
-    );
-
-    const LMTTokenContract = getContract(
-      contracts.testnet.LMT_TOKEN.address,
-      LMT_TOKEN.abi,
-      library,
-      address
-    );
-
-    await this.setState({
-      ...this.state,
-      limeChain: {
-        ...this.state.limeChain,
-        library,
-        chainId: network.chainId,
-        address: signerAddress,
-        routerContract: LMTRouterContract,
-        tokenContract: LMTTokenContract,
-        connected: true
-      },
-    });
-
-    LMTRouterContract.on(
-      "LMTTokenLocked",
-      async (sender, amount, receivingWalletAddress) => {
-        await this.setState({
-          limeToApple: {
-            executed: true,
-            toBeExecuted: false,
-          },
-        });
-        const releaseTx = await this.state.appleChain.routerContract.releaseAmount(
-          amount,
-          receivingWalletAddress
-        );
-        await releaseTx.wait();
-      }
-    );
-
-    LMTRouterContract.on("LMTTokenReleased", async (amount) => {
-      await this.setState({
-        appleToLime: {
-          executed: true,
-          toBeExecuted: false,
-        },
-      });
-    });
-
-    await this.subscribeToProviderEvents(this.state.limeChain);
-  };
-
-  public onConnectToApple = async () => {
-    await this.setState({
-      ...this.state,
-      appleChain: {
-        ...this.state.appleChain,
-        chainId: 3,
-        web3Modal: new Web3Modal({
-          network: this.getNetwork(3),
-          cacheProvider: true,
-          providerOptions: this.getProviderOptions(),
-        }),
-      },
-    });
-
-    this.state.appleChain.provider = await this.state.appleChain.web3Modal.connect();
-
-    const library = new Web3Provider(this.state.appleChain.provider);
+    const library = new Web3Provider(provider);
 
     const signerAddress = await library.getSigner().getAddress();
 
     const network = await library.getNetwork();
 
-    const address = this.state.appleChain.provider.selectedAddress
-      ? this.state.appleChain.provider.selectedAddress
-      : this.state.appleChain.provider?.accounts[0];
+    const address = provider.selectedAddress
+      ? provider?.selectedAddress
+      : provider?.accounts[0];
 
-    const APTRouterContract = getContract(
-      contracts.testnet.APT_ROUTER.address,
-      APT_ROUTER.abi,
+    const sourceRouterAddress =
+      this.state.sourceToTarget.source === "lime"
+        ? contracts.LMT_ROUTER.address
+        : this.state.sourceToTarget.source === "apple"
+        ? contracts.APT_ROUTER.address
+        : "";
+
+    const targetRouterAddress =
+      this.state.sourceToTarget.target === "lime"
+        ? contracts.LMT_ROUTER.address
+        : this.state.sourceToTarget.target === "apple"
+        ? contracts.APT_ROUTER.address
+        : "";
+
+    const sourceTokenAddress =
+      this.state.sourceToTarget.source === "lime"
+        ? contracts.LMT_TOKEN.address
+        : this.state.sourceToTarget.source === "apple"
+        ? contracts.APT_TOKEN.address
+        : "";
+
+    const sourceTokenAbi =
+      this.state.sourceToTarget.source === "lime"
+        ? LMT_TOKEN.abi
+        : this.state.sourceToTarget.source === "apple"
+        ? APT_TOKEN.abi
+        : "";
+
+    const sourceRouterContract = getContract(
+      sourceRouterAddress,
+      ROUTER.abi,
       library,
       address
     );
 
-    const APTTokenContract = getContract(
-      contracts.testnet.APT_TOKEN.address,
-      APT_TOKEN.abi,
+    const targetRouterContract = getContract(
+      targetRouterAddress,
+      ROUTER.abi,
       library,
       address
     );
 
-    this.setState({
-      ...this.state,
-      appleChain: {
-        ...this.state.appleChain,
+    const sourceTokenContract = getContract(
+      sourceTokenAddress,
+      sourceTokenAbi,
+      library,
+      address
+    ); 
+    const approveRouterTx = await sourceTokenContract.approve(
+      sourceRouterContract.address,
+      parseEther("1000")
+    );
+    await approveRouterTx.wait();
+
+    await this.setState({
+      chainConnection: {
+        ...this.state.chainConnection,
+        provider,
         library,
         chainId: network.chainId,
         address: signerAddress,
-        routerContract: APTRouterContract,
-        tokenContract: APTTokenContract,
-        connected: true
+        sourceRouterContract,
+        sourceTokenContract,
+        targetRouterContract,
+        connected: true,
       },
     });
 
-    APTRouterContract.on(
-      "APTTokenLocked",
+    sourceRouterContract.on(
+      "TokenLocked",
       async (sender, amount, receivingWalletAddress) => {
-        const releaseTx = await this.state.limeChain.routerContract.releaseAmount(
-          amount,
-          receivingWalletAddress
+        const userLockedAmount = await sourceRouterContract.userToLocked(
+          sender,
+          sourceTokenAddress
         );
-        await releaseTx.wait();
+
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x3' }], // chainId must be in hexadecimal numbers
+        });
+        await this.setState({ claimable: { amount: formatEther(userLockedAmount) } });
+
         await this.setState({
-          appleToLime: {
-            executed: true,
-            toBeExecuted: false,
+          chainConnection: {
+            ...this.state.chainConnection,
+            chainId: 3,
+            web3Modal: new Web3Modal({
+              network: this.getNetwork(3),
+              cacheProvider: true,
+              providerOptions: this.getProviderOptions(),
+            }),
+          },
+        });
+
+        const provider = await this.state.chainConnection.web3Modal.connect(); 
+
+        const library = new Web3Provider(provider);
+
+        const signerAddress = await library.getSigner().getAddress();
+
+        const network = await library.getNetwork();
+
+        await this.setState({
+          chainConnection: {
+            ...this.state.chainConnection,
+            provider,
+            library,
+            chainId: network.chainId,
+            address: signerAddress,
+            connected: true,
           },
         });
       }
     );
+    await this.setState({fetching: false})    
+    // LMTRouterContract.on("LMTTokenReleased", async (amount) => {
+    //   await this.setState({
+    //     appleToLime: {
+    //       executed: true,
+    //       toBeExecuted: false,
+    //     },
+    //   });
+    // });
 
-    APTRouterContract.on("APTTokenReleased", async (amount) => {
-      await this.setState({
-        limeToApple: {
-          executed: true,
-          toBeExecuted: false,
-        },
-      });
-    });
-
-    await this.subscribeToProviderEvents(this.state.appleChain);
+    await this.subscribeToProviderEvents(this.state.chainConnection);
   };
 
   public subscribeToProviderEvents = async (chainData: IChainConn) => {
@@ -351,33 +308,44 @@ class App extends React.Component<any, any> {
     chainData.provider.off("close", this.close);
   }
 
-  public async bridgeAmount(from: string, amount: string) {
-    await this.setState({ fetching: true });
-    switch (from) {
-      case "LMT":
-        const lockLMTTx = await this.state.limeChain.routerContract.lockAmount(
-          this.state.appleChain.address,
-          parseEther(amount)
-        );
-        await lockLMTTx.wait();
-        await this.setState({ fetching: false });
-        break;
-      case "APT":
-        const lockAPTTx = await this.state.limeChain.routerContract.lockAmount(
-          this.state.limeChain.address,
-          parseEther(amount)
-        );
-        await lockAPTTx.wait();
-        await this.setState({ fetching: false });
-        break;
+  public async bridgeAmount() {
+    const {
+      sourceRouterContract,
+      sourceTokenContract,
+    } = this.state.chainConnection;
+    const sourceValue = this.state.sourceInput;
+    try {
+      await this.setState({ fetching: true });
 
-      default: {
-        await this.setState({ fetching: false });
-        return true;
-      }
+      const lockTx = await sourceRouterContract.lock(
+        sourceTokenContract.address,
+        parseEther(sourceValue)
+      );
+      await lockTx.wait();
+      await this.setState({ fetching: false });
+    } catch (e) {
+      await this.setState({ fetching: false });
+      return false;
     }
-    return false;
+    return true;
   }
+
+  public async claim() {
+    console.log(this.state.chainConnection.targetRouterContract.address)
+    await this.setState({ fetching: true });
+    try {
+      const claimTx = await this.state.chainConnection.targetRouterContract.claim(
+      this.state.chainConnection.address,
+      this.state.chainConnection.sourceTokenContract.address,
+      parseEther(this.state.claimable.claimed)
+    );
+    await claimTx.wait();
+    } catch(e) {
+      await this.setState({ fetching: false });
+      return false;
+    }
+    return true
+  };
 
   public changedAccount = async (accounts: string[], chainData: IChainConn) => {
     if (!accounts.length) {
@@ -432,14 +400,9 @@ class App extends React.Component<any, any> {
       <SLayout>
         <Column maxWidth={1000} spanHeight>
           <Header
-            connected={this.state.limeChain.connected}
-            chainConnData={this.state.limeChain}
-            killSession={(limeChain) => this.resetApp(limeChain)}
-          />
-          <Header
-            connected={this.state.appleChain.connected}
-            chainConnData={this.state.appleChain}
-            killSession={(appleChain) => this.resetApp(appleChain)}
+            connected={this.state.chainConnection.connected}
+            chainConnData={this.state.chainConnection}
+            killSession={() => this.resetApp(this.state.chainConnection)}
           />
           <SContent>
             {fetching ? (
@@ -450,56 +413,66 @@ class App extends React.Component<any, any> {
               </Column>
             ) : (
               <SLanding center>
-                {!this.state.limeChain.connected ? (
+                {!this.state.chainConnection.connected ? (
                   <>
                     <ConnectButton
-                      title="Connect to Rinkeby Account (LMT) "
-                      onClick={this.onConnectToLime}
+                      title="Connect to Wallet"
+                      onClick={this.onConnect}
                     />
                   </>
                 ) : (
                   <></>
                 )}
-                {!this.state.appleChain.connected ? (
-                  <ConnectButton
-                    title="Connect to Ropsten Account (APT)"
-                    onClick={this.onConnectToApple}
-                  />
-                ) : (
-                  <></>
-                )}
-                {this.state.limeChain.connected &&
-                this.state.appleChain.connected ? (
+                {this.state.chainConnection.connected ? (
                   <>
                     <Input
-                      disabled={!this.state.limeToApple.toBeExecuted}
+                      disabled={false}
                       name="lime-field"
                       placeholder="LMT Amount"
+                      onChange={async (e) =>
+                        await this.setState({ sourceInput: e.target.value })
+                      }
                     />
                     <Input
-                      disabled={!this.state.appleToLime.toBeExecuted}
+                      disabled={!this.state.claimable.amount}
                       name="apple-field"
-                      placeholder="APT Amount"
-                    />
-                    <ConnectButton
-                      title="Swap"
-                      onClick={async () => {
+                      placeholder="wLMT Amount"
+                      value={this.state.claimable.amount}
+                      onChange={async (e) =>
                         await this.setState({
-                          error: this.state.appleToLime.toBeExecuted
-                            ? await this.bridgeAmount("APT", "100")
-                            : this.state.limeToApple.toBeExecuted
-                            ? await this.bridgeAmount("LMT", "100")
-                            : true,
-                        });
-
-                        const balanceLime = formatEther(
-                          await this.state.limeChain.tokenContract.balanceOf(
-                            this.state.limeChain.address
-                          )
-                        );
-                        console.log(balanceLime);
-                      }}
+                          claimable: {
+                            ...this.state.claimable,
+                            claimed: e.target.value,
+                          },
+                        })
+                      }
                     />
+                    {this.state.claimable.amount ? (
+                      <ConnectButton
+                        title="Claim"
+                        onClick={async () => {
+                          await this.setState({
+                            error: await !this.claim(),
+                          });
+                        }}
+                      />
+                    ) : (
+                      <ConnectButton
+                        title="Swap"
+                        onClick={async () => {
+                          await this.setState({
+                            error: await !this.bridgeAmount(),
+                          });
+
+                          const balanceLime = formatEther(
+                            await this.state.chainConnection.sourceTokenContract.balanceOf(
+                              this.state.chainConnection.address
+                            )
+                          );
+                          console.log(balanceLime);
+                        }}
+                      />
+                    )}
                   </>
                 ) : (
                   <></>
