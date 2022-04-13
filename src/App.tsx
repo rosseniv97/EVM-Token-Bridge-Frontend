@@ -23,6 +23,7 @@ import { getContract } from "./helpers/ethers";
 import ROUTER from "./constants/abis/Router.json";
 import APT_TOKEN from "./constants/abis/APT.json";
 import LMT_TOKEN from "./constants/abis/LMT.json";
+import WRAPPED_TOKEN from "./constants/abis/WrappedToken.json";
 
 // import Button from "./components/Button";
 import { formatEther, parseEther } from "ethers/lib/utils";
@@ -68,7 +69,11 @@ interface IAppState {
   pendingRequest: boolean;
   chainConnection: IChainConn;
   sourceToTarget: any;
+  targetRouterContract: Contract;
+  sourceRouterContract: Contract;
+  sourceTokenContract: Contract;
   claimable: any;
+  receivingAddress: any;
   sourceInput: string;
   result: any | null;
   info: any | null;
@@ -84,11 +89,11 @@ const INITIAL_STATE: IAppState = {
     library: null,
     chainId: -1,
     address: "",
-    sourceRouterContract: new Contract(contracts.LMT_ROUTER.address, ROUTER.abi),
-    sourceTokenContract: new Contract(contracts.LMT_TOKEN.address, ROUTER.abi),
-    targetRouterContract: new Contract(contracts.APT_ROUTER.address, ROUTER.abi),
     connected: false,
   },
+  targetRouterContract: new Contract(contracts.APT_ROUTER.address, ROUTER.abi),
+  sourceRouterContract: new Contract(contracts.LMT_ROUTER.address, ROUTER.abi),
+  sourceTokenContract: new Contract(contracts.LMT_TOKEN.address, ROUTER.abi),
   sourceToTarget: {
     source: "lime",
     target: "apple",
@@ -97,6 +102,7 @@ const INITIAL_STATE: IAppState = {
     amount: 0,
     claimed: 0,
   },
+  receivingAddress: "",
   sourceInput: "",
   result: null,
   info: null,
@@ -118,13 +124,13 @@ class App extends React.Component<any, any> {
   }
 
   public onConnect = async () => {
-    await this.setState({fetching: true}) 
+    await this.setState({ fetching: true });
     await this.setState({
       chainConnection: {
         ...this.state.chainConnection,
         chainId: 4,
         web3Modal: new Web3Modal({
-          network: this.getNetwork(4),
+          network: "any",
           cacheProvider: false,
           providerOptions: this.getProviderOptions(),
         }),
@@ -133,7 +139,7 @@ class App extends React.Component<any, any> {
 
     const provider = await this.state.chainConnection.web3Modal.connect();
 
-    const library = new Web3Provider(provider);
+    const library = new Web3Provider(provider, "any");
 
     const signerAddress = await library.getSigner().getAddress();
 
@@ -147,13 +153,6 @@ class App extends React.Component<any, any> {
       this.state.sourceToTarget.source === "lime"
         ? contracts.LMT_ROUTER.address
         : this.state.sourceToTarget.source === "apple"
-        ? contracts.APT_ROUTER.address
-        : "";
-
-    const targetRouterAddress =
-      this.state.sourceToTarget.target === "lime"
-        ? contracts.LMT_ROUTER.address
-        : this.state.sourceToTarget.target === "apple"
         ? contracts.APT_ROUTER.address
         : "";
 
@@ -178,6 +177,13 @@ class App extends React.Component<any, any> {
       address
     );
 
+    const targetRouterAddress =
+      this.state.sourceToTarget.target === "lime"
+        ? contracts.LMT_ROUTER.address
+        : this.state.sourceToTarget.target === "apple"
+        ? contracts.APT_ROUTER.address
+        : "";
+
     const targetRouterContract = getContract(
       targetRouterAddress,
       ROUTER.abi,
@@ -190,7 +196,7 @@ class App extends React.Component<any, any> {
       sourceTokenAbi,
       library,
       address
-    ); 
+    );
     const approveRouterTx = await sourceTokenContract.approve(
       sourceRouterContract.address,
       parseEther("1000")
@@ -204,18 +210,18 @@ class App extends React.Component<any, any> {
         library,
         chainId: network.chainId,
         address: signerAddress,
-        sourceRouterContract,
-        sourceTokenContract,
-        targetRouterContract,
         connected: true,
       },
+      sourceRouterContract,
+      sourceTokenContract,
+      targetRouterContract
     });
 
     sourceRouterContract.on(
       "TokenLocked",
-      async (sender, amount, receivingWalletAddress) => {
+      async (senderAddress, amount, tokenContractAddress) => {
         const userLockedAmount = await sourceRouterContract.userToLocked(
-          sender,
+          senderAddress,
           sourceTokenAddress
         );
 
@@ -229,21 +235,17 @@ class App extends React.Component<any, any> {
             }),
           },
         });
-    
+
         const provider = await this.state.chainConnection.web3Modal.connect();
 
         await this.setState({
           chainConnection: {
             ...this.state.chainConnection,
-            provider
-        }});
-
-        await window.ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: '0x3' }], // chainId must be in hexadecimal numbers
+            provider,
+          },
         });
 
-        const library = new Web3Provider(provider);
+        const library = new Web3Provider(provider, "any");
 
         const signerAddress = await library.getSigner().getAddress();
 
@@ -260,22 +262,35 @@ class App extends React.Component<any, any> {
           },
         });
 
-        await this.setState({ claimable: { amount: formatEther(userLockedAmount) } });
+        await window.ethereum.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: "0x3" }], // chainId must be in hexadecimal numbers
+        });
 
         await this.setState({
+          claimable: {
+            amount: formatEther(userLockedAmount),
+          },
           chainConnection: {
             ...this.state.chainConnection,
-            chainId: 3,
-            web3Modal: new Web3Modal({
-              network: this.getNetwork(3),
-              cacheProvider: true,
-              providerOptions: this.getProviderOptions(),
-            }),
           },
+          receivingAddress: senderAddress,
         });
       }
     );
-    await this.setState({fetching: false})    
+
+    targetRouterContract.on(
+      "TokenClaimed",
+      async (receiverAddress, amount, wrappedTokenAddress) => {
+        const wrappedTokenContract = getContract(
+          wrappedTokenAddress,
+          WRAPPED_TOKEN.abi,
+          library,
+          address
+        );
+        console.log(await wrappedTokenContract.balanceOf(receiverAddress));
+      })
+    await this.setState({ fetching: false });
     // LMTRouterContract.on("LMTTokenReleased", async (amount) => {
     //   await this.setState({
     //     appleToLime: {
@@ -327,10 +342,7 @@ class App extends React.Component<any, any> {
   }
 
   public async bridgeAmount() {
-    const {
-      sourceRouterContract,
-      sourceTokenContract,
-    } = this.state.chainConnection;
+    const { sourceRouterContract, sourceTokenContract } = this.state;
     const sourceValue = this.state.sourceInput;
     try {
       await this.setState({ fetching: true });
@@ -349,21 +361,22 @@ class App extends React.Component<any, any> {
   }
 
   public async claim() {
-    console.log(this.state.chainConnection.targetRouterContract.address)
+    console.log(this.state.receivingAddress);
     await this.setState({ fetching: true });
+    console.log();
     try {
-      const claimTx = await this.state.chainConnection.targetRouterContract.claim(
-      this.state.chainConnection.address,
-      this.state.chainConnection.sourceTokenContract.address,
-      parseEther(this.state.claimable.claimed)
-    );
-    await claimTx.wait();
-    } catch(e) {
+      const claimTx = await this.state.targetRouterContract.claim(
+        this.state.receivingAddress,
+        this.state.sourceTokenContract.address,
+        parseEther(this.state.claimable.claimed.toString())
+      );
+      await claimTx.wait();
+    } catch (e) {
       await this.setState({ fetching: false });
       return false;
     }
-    return true
-  };
+    return true;
+  }
 
   public changedAccount = async (accounts: string[], chainData: IChainConn) => {
     if (!accounts.length) {
@@ -483,7 +496,7 @@ class App extends React.Component<any, any> {
                           });
 
                           const balanceLime = formatEther(
-                            await this.state.chainConnection.sourceTokenContract.balanceOf(
+                            await this.state.sourceTokenContract.balanceOf(
                               this.state.chainConnection.address
                             )
                           );
