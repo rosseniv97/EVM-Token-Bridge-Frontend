@@ -125,7 +125,7 @@ class App extends React.Component<any, any> {
         chainId: 4,
         web3Modal: new Web3Modal({
           network: this.getNetwork(4),
-          cacheProvider: true,
+          cacheProvider: false,
           providerOptions: this.getProviderOptions(),
         }),
       },
@@ -219,25 +219,29 @@ class App extends React.Component<any, any> {
           sourceTokenAddress
         );
 
-        await window.ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: '0x3' }], // chainId must be in hexadecimal numbers
-        });
-        await this.setState({ claimable: { amount: formatEther(userLockedAmount) } });
-
         await this.setState({
           chainConnection: {
             ...this.state.chainConnection,
-            chainId: 3,
             web3Modal: new Web3Modal({
-              network: this.getNetwork(3),
-              cacheProvider: true,
+              network: "any",
+              cacheProvider: false,
               providerOptions: this.getProviderOptions(),
             }),
           },
         });
+    
+        const provider = await this.state.chainConnection.web3Modal.connect();
 
-        const provider = await this.state.chainConnection.web3Modal.connect(); 
+        await this.setState({
+          chainConnection: {
+            ...this.state.chainConnection,
+            provider
+        }});
+
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0x3' }], // chainId must be in hexadecimal numbers
+        });
 
         const library = new Web3Provider(provider);
 
@@ -253,6 +257,20 @@ class App extends React.Component<any, any> {
             chainId: network.chainId,
             address: signerAddress,
             connected: true,
+          },
+        });
+
+        await this.setState({ claimable: { amount: formatEther(userLockedAmount) } });
+
+        await this.setState({
+          chainConnection: {
+            ...this.state.chainConnection,
+            chainId: 3,
+            web3Modal: new Web3Modal({
+              network: this.getNetwork(3),
+              cacheProvider: true,
+              providerOptions: this.getProviderOptions(),
+            }),
           },
         });
       }
