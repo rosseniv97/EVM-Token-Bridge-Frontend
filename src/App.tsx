@@ -73,6 +73,7 @@ interface IAppState {
   sourceRouterContract: Contract;
   sourceTokenContract: Contract;
   claimable: any;
+  wrappedBalance: number;
   receivingAddress: any;
   sourceInput: string;
   result: any | null;
@@ -102,6 +103,7 @@ const INITIAL_STATE: IAppState = {
     amount: 0,
     claimed: 0,
   },
+  wrappedBalance: 0,
   receivingAddress: "",
   sourceInput: "",
   result: null,
@@ -177,31 +179,18 @@ class App extends React.Component<any, any> {
       address
     );
 
-    const targetRouterAddress =
-      this.state.sourceToTarget.target === "lime"
-        ? contracts.LMT_ROUTER.address
-        : this.state.sourceToTarget.target === "apple"
-        ? contracts.APT_ROUTER.address
-        : "";
-
-    const targetRouterContract = getContract(
-      targetRouterAddress,
-      ROUTER.abi,
-      library,
-      address
-    );
-
     const sourceTokenContract = getContract(
       sourceTokenAddress,
       sourceTokenAbi,
       library,
       address
     );
-    const approveRouterTx = await sourceTokenContract.approve(
-      sourceRouterContract.address,
-      parseEther("1000")
-    );
-    await approveRouterTx.wait();
+
+    // const approveRouterTx = await sourceTokenContract.approve(
+    //   sourceRouterContract.address,
+    //   parseEther("1000")
+    // );
+    // await approveRouterTx.wait();
 
     await this.setState({
       chainConnection: {
@@ -214,7 +203,6 @@ class App extends React.Component<any, any> {
       },
       sourceRouterContract,
       sourceTokenContract,
-      targetRouterContract
     });
 
     sourceRouterContract.on(
@@ -267,38 +255,35 @@ class App extends React.Component<any, any> {
           params: [{ chainId: "0x3" }], // chainId must be in hexadecimal numbers
         });
 
+        const targetRouterAddress =
+          this.state.sourceToTarget.target === "lime"
+            ? contracts.LMT_ROUTER.address
+            : this.state.sourceToTarget.target === "apple"
+            ? contracts.APT_ROUTER.address
+            : "";
+
+        const targetRouterContract = getContract(
+          targetRouterAddress,
+          ROUTER.abi,
+          this.state.chainConnection.library,
+          address
+        );
+
         await this.setState({
           claimable: {
+            ...this.state.claimable,
             amount: formatEther(userLockedAmount),
           },
           chainConnection: {
             ...this.state.chainConnection,
           },
           receivingAddress: senderAddress,
+          targetRouterContract,
         });
       }
     );
 
-    targetRouterContract.on(
-      "TokenClaimed",
-      async (receiverAddress, amount, wrappedTokenAddress) => {
-        const wrappedTokenContract = getContract(
-          wrappedTokenAddress,
-          WRAPPED_TOKEN.abi,
-          library,
-          address
-        );
-        console.log(await wrappedTokenContract.balanceOf(receiverAddress));
-      })
     await this.setState({ fetching: false });
-    // LMTRouterContract.on("LMTTokenReleased", async (amount) => {
-    //   await this.setState({
-    //     appleToLime: {
-    //       executed: true,
-    //       toBeExecuted: false,
-    //     },
-    //   });
-    // });
 
     await this.subscribeToProviderEvents(this.state.chainConnection);
   };
@@ -361,20 +346,52 @@ class App extends React.Component<any, any> {
   }
 
   public async claim() {
-    console.log(this.state.receivingAddress);
+    const { targetRouterContract } = this.state;
+    targetRouterContract.on(
+      "TokenClaimed",
+      async (
+        receiverAddress: string,
+        amount: string,
+        wrappedTokenAddress: string
+      ) => {
+        console.log(wrappedTokenAddress + " - " + amount);
+        const wrappedTokenContract = getContract(
+          wrappedTokenAddress,
+          WRAPPED_TOKEN.abi,
+          this.state.chainConnection.library,
+          receiverAddress
+        );
+        const parsedAmount = parseInt(formatEther(amount), 10);
+        const parseClaimableAmount = parseInt(
+          this.state.claimable.claimed.toString(),
+          10
+        );
+        const updatedClaimableAmount = parseClaimableAmount - parsedAmount;
+        await this.setState({
+          claimable: {
+            claimed: 0,
+            amount: updatedClaimableAmount,
+          },
+          wrappedBalance: formatEther(await wrappedTokenContract.balanceOf(receiverAddress))
+        });
+      }
+    );
     await this.setState({ fetching: true });
-    console.log();
+    console.log("Amount: " + this.state.claimable.claimed.toString());
     try {
-      const claimTx = await this.state.targetRouterContract.claim(
+      const claimTx = await targetRouterContract.claim(
         this.state.receivingAddress,
         this.state.sourceTokenContract.address,
         parseEther(this.state.claimable.claimed.toString())
       );
       await claimTx.wait();
+      console.log(this.state.receivingAddress);
     } catch (e) {
+      console.log(e);
       await this.setState({ fetching: false });
       return false;
     }
+    await this.setState({ fetching: false });
     return true;
   }
 
@@ -468,15 +485,22 @@ class App extends React.Component<any, any> {
                       disabled={!this.state.claimable.amount}
                       name="apple-field"
                       placeholder="wLMT Amount"
-                      value={this.state.claimable.amount}
-                      onChange={async (e) =>
+                      value={this.state.claimable.claimed}
+                      onChange={async (e) => {
+                        const maxClaimableAmount = this.state.claimable.amount;
+                        if (
+                          parseFloat(e.target.value) >
+                          this.state.claimable.amount
+                        ) {
+                          e.target.value = maxClaimableAmount;
+                        }
                         await this.setState({
                           claimable: {
                             ...this.state.claimable,
                             claimed: e.target.value,
                           },
-                        })
-                      }
+                        });
+                      }}
                     />
                     {this.state.claimable.amount ? (
                       <ConnectButton
@@ -495,12 +519,12 @@ class App extends React.Component<any, any> {
                             error: await !this.bridgeAmount(),
                           });
 
-                          const balanceLime = formatEther(
-                            await this.state.sourceTokenContract.balanceOf(
-                              this.state.chainConnection.address
-                            )
-                          );
-                          console.log(balanceLime);
+                          // const balanceLime = formatEther(
+                          //   await this.state.sourceTokenContract.balanceOf(
+                          //     this.state.chainConnection.address
+                          //   )
+                          // );
+                          // console.log(balanceLime);
                         }}
                       />
                     )}
