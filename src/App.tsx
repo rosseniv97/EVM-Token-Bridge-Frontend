@@ -1,6 +1,5 @@
 import * as React from "react";
 import styled from "styled-components";
-import { Input } from "antd";
 import "antd/dist/antd.css";
 
 import { IChainConn } from "./helpers/types";
@@ -28,6 +27,7 @@ import WRAPPED_TOKEN from "./constants/abis/WrappedToken.json";
 // import Button from "./components/Button";
 import { formatEther, parseEther } from "ethers/lib/utils";
 import { Contract } from "ethers/lib/ethers";
+import InputForm from "./components/InputForm";
 
 const SLayout = styled.div`
   position: relative;
@@ -101,7 +101,6 @@ const INITIAL_STATE: IAppState = {
   },
   claimable: {
     amount: 0,
-    claimed: 0,
   },
   wrappedBalance: 0,
   receivingAddress: "",
@@ -269,6 +268,37 @@ class App extends React.Component<any, any> {
           address
         );
 
+        targetRouterContract.on(
+          "TokenClaimed",
+          async (
+            receiverAddress: string,
+            amount: string,
+            wrappedTokenAddress: string
+          ) => {
+            console.log(wrappedTokenAddress + " - " + amount);
+            const wrappedTokenContract = getContract(
+              wrappedTokenAddress,
+              WRAPPED_TOKEN.abi,
+              this.state.chainConnection.library,
+              receiverAddress
+            );
+            const parsedAmount = parseInt(formatEther(amount), 10);
+            const parseClaimableAmount = parseInt(
+              this.state.claimable.amount.toString(),
+              10
+            );
+            const updatedClaimableAmount = parseClaimableAmount - parsedAmount;
+            await this.setState({
+              claimable: {
+                amount: updatedClaimableAmount,
+              },
+              wrappedBalance: formatEther(
+                await wrappedTokenContract.balanceOf(receiverAddress)
+              ),
+            });
+          }
+        );
+
         await this.setState({
           claimable: {
             ...this.state.claimable,
@@ -326,26 +356,29 @@ class App extends React.Component<any, any> {
     chainData.provider.off("close", this.close);
   }
 
-  public async bridgeAmount() {
+  public async bridgeAmount(sourceInput: string) {
+    console.log("bridge");
     const { sourceRouterContract, sourceTokenContract } = this.state;
-    const sourceValue = this.state.sourceInput;
+    console.log(sourceRouterContract);
+
     try {
       await this.setState({ fetching: true });
 
       const lockTx = await sourceRouterContract.lock(
         sourceTokenContract.address,
-        parseEther(sourceValue)
+        parseEther(sourceInput)
       );
       await lockTx.wait();
       await this.setState({ fetching: false });
     } catch (e) {
+      console.log(e);
       await this.setState({ fetching: false });
       return false;
     }
     return true;
   }
 
-  public async claim() {
+  public async claim(wrappedInput: string) {
     const { targetRouterContract } = this.state;
     targetRouterContract.on(
       "TokenClaimed",
@@ -363,26 +396,27 @@ class App extends React.Component<any, any> {
         );
         const parsedAmount = parseInt(formatEther(amount), 10);
         const parseClaimableAmount = parseInt(
-          this.state.claimable.claimed.toString(),
+          this.state.claimable.amount.toString(),
           10
         );
         const updatedClaimableAmount = parseClaimableAmount - parsedAmount;
         await this.setState({
           claimable: {
-            claimed: 0,
             amount: updatedClaimableAmount,
           },
-          wrappedBalance: formatEther(await wrappedTokenContract.balanceOf(receiverAddress))
+          wrappedBalance: formatEther(
+            await wrappedTokenContract.balanceOf(receiverAddress)
+          ),
         });
       }
     );
     await this.setState({ fetching: true });
-    console.log("Amount: " + this.state.claimable.claimed.toString());
+    console.log("Amount: " + wrappedInput);
     try {
       const claimTx = await targetRouterContract.claim(
         this.state.receivingAddress,
         this.state.sourceTokenContract.address,
-        parseEther(this.state.claimable.claimed.toString())
+        parseEther(wrappedInput)
       );
       await claimTx.wait();
       console.log(this.state.receivingAddress);
@@ -469,68 +503,15 @@ class App extends React.Component<any, any> {
                     />
                   </>
                 ) : (
-                  <></>
-                )}
-                {this.state.chainConnection.connected ? (
-                  <>
-                    <Input
-                      disabled={false}
-                      name="lime-field"
-                      placeholder="LMT Amount"
-                      onChange={async (e) =>
-                        await this.setState({ sourceInput: e.target.value })
-                      }
-                    />
-                    <Input
-                      disabled={!this.state.claimable.amount}
-                      name="apple-field"
-                      placeholder="wLMT Amount"
-                      value={this.state.claimable.claimed}
-                      onChange={async (e) => {
-                        const maxClaimableAmount = this.state.claimable.amount;
-                        if (
-                          parseFloat(e.target.value) >
-                          this.state.claimable.amount
-                        ) {
-                          e.target.value = maxClaimableAmount;
-                        }
-                        await this.setState({
-                          claimable: {
-                            ...this.state.claimable,
-                            claimed: e.target.value,
-                          },
-                        });
-                      }}
-                    />
-                    {this.state.claimable.amount ? (
-                      <ConnectButton
-                        title="Claim"
-                        onClick={async () => {
-                          await this.setState({
-                            error: await !this.claim(),
-                          });
-                        }}
-                      />
-                    ) : (
-                      <ConnectButton
-                        title="Swap"
-                        onClick={async () => {
-                          await this.setState({
-                            error: await !this.bridgeAmount(),
-                          });
-
-                          // const balanceLime = formatEther(
-                          //   await this.state.sourceTokenContract.balanceOf(
-                          //     this.state.chainConnection.address
-                          //   )
-                          // );
-                          // console.log(balanceLime);
-                        }}
-                      />
-                    )}
-                  </>
-                ) : (
-                  <></>
+                  <InputForm
+                    claim={async (wrappedInput: string) =>
+                      await this.claim(wrappedInput)
+                    }
+                    bridgeAmount={async (sourceInput: string) =>
+                      await this.bridgeAmount(sourceInput)
+                    }
+                    claimable={this.state.claimable}
+                  />
                 )}
                 {this.state.error ? (
                   <div>ERROR submitting transacation</div>

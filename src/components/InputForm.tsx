@@ -4,13 +4,10 @@ import "antd/dist/antd.css";
 import ConnectButton from "./ConnectButton";
 
 export default (props: any) => {
-    const { claim, bridgeAmount } = props;
-  const [claimable, setClaimable] = useState({
-    amount: 0,
-    claimed: 0,
-  });
+  const { claim, bridgeAmount, claimable } = props;
   const [input, setInput] = useState({
     sourceInput: "",
+    wrappedInput: "",
     targetInput: "",
   });
 
@@ -19,42 +16,47 @@ export default (props: any) => {
       <Input
         disabled={false}
         name="lime-field"
+        value={input.sourceInput}
         placeholder="LMT Amount"
-        onChange={async (e) =>
-          setInput({
-            ...input,
-            sourceInput: e.target.value,
-          })
-        }
+        onChange={async (e) => {
+          if (parseInt(e.target.value, 10) || e.target.value === "") {
+            setInput({
+              ...input,
+              sourceInput: e.target.value,
+            });
+          }
+        }}
       />
       <Input
-        disabled={!claimable.amount}
+        // disabled={!claimable.amount}
         name="apple-field"
         placeholder="wLMT Amount"
-        value={claimable.claimed}
+        value={input.wrappedInput}
         onChange={async (e) => {
-          const maxClaimableAmount = claimable.amount;
-          if (parseFloat(e.target.value) > claimable.amount) {
-            e.target.value = maxClaimableAmount.toString();
+          // const maxClaimableAmount = claimable.amount;
+          // if (parseFloat(e.target.value) > claimable.amount) {
+          //   e.target.value = maxClaimableAmount.toString();
+          // }
+          if (parseInt(e.target.value, 10) || e.target.value === "") {
+            setInput({
+              ...input,
+              wrappedInput: e.target.value,
+            });
           }
-          setClaimable({
-            ...claimable,
-            claimed: parseFloat(e.target.value),
-          });
         }}
       />
       {claimable.amount ? (
         <ConnectButton
           title="Claim"
           onClick={async () => {
-            claim();
+            await claim(input.wrappedInput);
           }}
         />
       ) : (
         <ConnectButton
           title="Swap"
           onClick={async () => {
-            bridgeAmount()
+            await bridgeAmount(input.sourceInput);
 
             // const balanceLime = formatEther(
             //   await sourceTokenContract.balanceOf(
