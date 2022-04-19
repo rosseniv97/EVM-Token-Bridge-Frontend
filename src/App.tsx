@@ -111,7 +111,7 @@ const INITIAL_STATE: IAppState = {
   },
   releasable: {
     amount: 0,
-    receivingAddress: ''
+    receivingAddress: "",
   },
   wrappedBalance: 0,
   sourceInput: "",
@@ -145,7 +145,7 @@ class App extends React.Component<any, any> {
     } catch (e) {
       console.log(e);
       await this.setState({ fetching: false });
-      return
+      return;
     }
 
     await this.setState({
@@ -240,7 +240,24 @@ class App extends React.Component<any, any> {
           },
           chainConnection: {
             ...this.state.chainConnection,
-          }
+          },
+        });
+      }
+    );
+
+    sourceRouterContract.on(
+      "TokenReleased",
+      async (receiverAddress, tokenContractAddress, amount) => {
+        const userLockedAmount = await sourceRouterContract.userToLocked(
+          receiverAddress,
+          tokenContractAddress
+        );
+
+        await this.setState({
+          wrappedBalance: formatEther(userLockedAmount),
+          chainConnection: {
+            ...this.state.chainConnection,
+          },
         });
       }
     );
@@ -326,6 +343,7 @@ class App extends React.Component<any, any> {
     targetRouterContract.on(
       "TokenBurned",
       async (sender: string, amount: string, nativeTokenAddress: string) => {
+        await this.setState({ fetching: true });
         console.log(nativeTokenAddress + "burned" + " - " + amount);
 
         const parsedAmount = parseFloat(formatEther(amount));
@@ -334,15 +352,47 @@ class App extends React.Component<any, any> {
           this.state.releasable.amount.toString(),
           10
         );
+
+        try {
+          await window.ethereum.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: "0x4" }], // chainId must be in hexadecimal numbers
+          });
+        } catch (e) {
+          console.log(e);
+          await this.setState({ fetching: false });
+          return;
+        }
+
+        await this.setState({
+          chainConnection: {
+            ...this.state.chainConnection,
+            chainId: 4,
+          },
+        });
+
+        const sourceRouterTokenContract = await this.state.sourceTokenContract.connect(this.state.sourceRouterContract.address)
+
+        const approveRouterTx = await sourceRouterTokenContract.approve(
+          sender,
+          parseEther("1000")
+        );
+        await approveRouterTx.wait();
+
         const updatedReleasableAmount = parseReleasableAmount + parsedAmount;
         const updatedWrappedBalance =
           parseFloat(this.state.wrappedBalance) - parsedAmount;
         await this.setState({
           releasable: {
             amount: updatedReleasableAmount,
-            receivingAddress: sender
+            receivingAddress: sender,
+          },
+          claimable: {
+            ...this.state.claimable,
+            connected: false,
           },
           wrappedBalance: updatedWrappedBalance,
+          fetching: false,
         });
       }
     );
@@ -442,10 +492,10 @@ class App extends React.Component<any, any> {
     const { targetRouterContract } = this.state;
 
     await this.setState({ fetching: true });
-    console.log("Amount: " + burnedInput);
+    console.log(this.state.sourceTokenContract);
     try {
       const burnTx = await targetRouterContract.burn(
-        this.state.wrappedTokenContract,
+        this.state.wrappedTokenContract.address,
         this.state.sourceTokenContract.address,
         parseEther(burnedInput)
       );
@@ -566,9 +616,10 @@ class App extends React.Component<any, any> {
                     burn={async (burnedInput: string) =>
                       await this.burn(burnedInput)
                     }
-                    release={async (releasedInput: string, receivingAddress: string) =>
-                      await this.release(releasedInput, receivingAddress)
-                    }
+                    release={async (
+                      releasedInput: string,
+                      receivingAddress: string
+                    ) => await this.release(releasedInput, receivingAddress)}
                     claimable={this.state.claimable}
                     wrappedBalance={this.state.wrappedBalance}
                     releasable={this.state.releasable}

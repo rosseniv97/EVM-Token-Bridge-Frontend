@@ -24,26 +24,7 @@ export default (props: any) => {
     <>
       {wrappedBalance > 0 ? (
         <>
-          <Input
-            name="wLime-field"
-            value={input.burnedInput}
-            placeholder="wLMT Amount"
-            onChange={async (e) => {
-              if (parseInt(e.target.value, 10) || e.target.value === "") {
-                setInput({
-                  ...input,
-                  burnedInput: e.target.value,
-                });
-              }
-            }}
-          />
-          <ConnectButton
-            title="Burn"
-            onClick={async () => {
-              await burn(input.burnedInput);
-            }}
-          />
-          {!releasable.amount ? (
+          {releasable.amount ? (
             <>
               <Input
                 name="lime-release-field"
@@ -65,36 +46,41 @@ export default (props: any) => {
               <ConnectButton
                 title="Release"
                 onClick={async () => {
-                  await release(input.sourceReleaseInput, releasable.receivingAddress);
+                  await release(
+                    input.sourceReleaseInput,
+                    releasable.receivingAddress
+                  );
                 }}
               />
             </>
           ) : (
-            <></>
+            <>
+              <Input
+                name="wLime-field"
+                value={input.burnedInput}
+                placeholder="wLMT Amount"
+                onChange={async (e) => {
+                  if (parseInt(e.target.value, 10) || e.target.value === "") {
+                    setInput({
+                      ...input,
+                      burnedInput: e.target.value,
+                    });
+                  }
+                }}
+              />
+              <ConnectButton
+                title="Burn"
+                onClick={async () => {
+                  await burn(input.burnedInput);
+                }}
+              />
+            </>
           )}
         </>
       ) : (
         <></>
       )}
-      <Input
-        name="lime-field"
-        value={input.sourceLockInput}
-        placeholder="LMT Amount"
-        onChange={async (e) => {
-          if (parseInt(e.target.value, 10) || e.target.value === "") {
-            setInput({
-              ...input,
-              sourceLockInput: e.target.value,
-            });
-          }
-        }}
-      />
-      <ConnectButton
-        title="Swap"
-        onClick={async (e: Event) => {
-          await bridgeAmount(input.sourceLockInput);
-        }}
-      />
+
       {claimable.amount > 0 && claimable.connected ? (
         <>
           <Input
@@ -123,7 +109,27 @@ export default (props: any) => {
           />
         </>
       ) : (
-        <></>
+        <>
+          <Input
+            name="lime-field"
+            value={input.sourceLockInput}
+            placeholder="LMT Amount"
+            onChange={async (e) => {
+              if (parseInt(e.target.value, 10) || e.target.value === "") {
+                setInput({
+                  ...input,
+                  sourceLockInput: e.target.value,
+                });
+              }
+            }}
+          />
+          <ConnectButton
+            title="Swap"
+            onClick={async (e: Event) => {
+              await bridgeAmount(input.sourceLockInput);
+            }}
+          />
+        </>
       )}
     </>
   );
