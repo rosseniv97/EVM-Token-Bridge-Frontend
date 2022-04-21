@@ -76,10 +76,11 @@ interface IHeaderProps {
   killSession: () => void;
   chainConnData: IChainConn;
   wrappedBalance: number;
+  nativeBalance: number;
 }
 
 const Header = (props: IHeaderProps) => {
-  const { wrappedBalance, chainConnData, killSession } = props;
+  const { wrappedBalance, nativeBalance, chainConnData, killSession } = props;
   const address = chainConnData?.address;
   const chainId = chainConnData?.chainId;
   const connected = chainConnData?.connected;
@@ -105,9 +106,14 @@ const Header = (props: IHeaderProps) => {
           </SDisconnect>
         </SActiveAccount>
       )}
+      <div style={{display: 'flex', flexDirection: 'column'}}>
       <SActiveChain>
         <p>{`wLMT: ${wrappedBalance} `}</p>
       </SActiveChain>
+      <SActiveChain>
+        <p>{`LMT: ${nativeBalance} `}</p>
+      </SActiveChain>
+      </div>
     </SHeader>
   );
 };

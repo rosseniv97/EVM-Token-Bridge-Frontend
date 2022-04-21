@@ -76,6 +76,7 @@ interface IAppState {
   claimable: any;
   releasable: any;
   wrappedBalance: number;
+  nativeBalance: number;
   sourceInput: string;
   result: any | null;
   info: any | null;
@@ -114,6 +115,7 @@ const INITIAL_STATE: IAppState = {
     receivingAddress: "",
   },
   wrappedBalance: 0,
+  nativeBalance: 0,
   sourceInput: "",
   result: null,
   info: null,
@@ -137,17 +139,6 @@ class App extends React.Component<any, any> {
   public onConnect = async () => {
     await this.setState({ fetching: true });
 
-    try {
-      await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: "0x4" }], // chainId must be in hexadecimal numbers
-      });
-    } catch (e) {
-      console.log(e);
-      await this.setState({ fetching: false });
-      return;
-    }
-
     await this.setState({
       chainConnection: {
         ...this.state.chainConnection,
@@ -165,6 +156,17 @@ class App extends React.Component<any, any> {
     const library = new Web3Provider(provider, "any");
 
     const network = await library.getNetwork();
+
+    try {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: "0x4" }], // chainId must be in hexadecimal numbers
+      });
+    } catch (e) {
+      console.log(e);
+      await this.setState({ fetching: false });
+      return;
+    }
 
     const address = provider.selectedAddress
       ? provider?.selectedAddress
@@ -205,11 +207,9 @@ class App extends React.Component<any, any> {
       address
     );
 
-    // const approveRouterTx = await sourceTokenContract.approve(
-    //   sourceRouterContract.address,
-    //   parseEther("1000")
-    // );
-    // await approveRouterTx.wait();
+    const nativeBalance = formatEther(
+      await sourceTokenContract.balanceOf(address)
+    );
 
     await this.setState({
       chainConnection: {
@@ -220,6 +220,7 @@ class App extends React.Component<any, any> {
         address,
         connected: true,
       },
+      nativeBalance,
       sourceRouterContract,
       sourceTokenContract,
     });
@@ -231,7 +232,9 @@ class App extends React.Component<any, any> {
           senderAddress,
           sourceTokenAddress
         );
-
+        const nativeBalance = formatEther(
+          await sourceTokenContract.balanceOf(senderAddress)
+        );
         await this.setState({
           claimable: {
             ...this.state.claimable,
@@ -241,6 +244,7 @@ class App extends React.Component<any, any> {
           chainConnection: {
             ...this.state.chainConnection,
           },
+          nativeBalance,
         });
       }
     );
@@ -248,16 +252,11 @@ class App extends React.Component<any, any> {
     sourceRouterContract.on(
       "TokenReleased",
       async (receiverAddress, tokenContractAddress, amount) => {
-        const userLockedAmount = await sourceRouterContract.userToLocked(
-          receiverAddress,
-          tokenContractAddress
+        const nativeBalance = await sourceTokenContract.balanceOf(
+          receiverAddress
         );
-
         await this.setState({
-          wrappedBalance: formatEther(userLockedAmount),
-          chainConnection: {
-            ...this.state.chainConnection,
-          },
+          nativeBalance,
         });
       }
     );
@@ -270,12 +269,10 @@ class App extends React.Component<any, any> {
   public connectToTarget = async () => {
     await this.setState({ fetching: true });
 
-    const changeNetworkResponse = await window.ethereum.request({
+    await window.ethereum.request({
       method: "wallet_switchEthereumChain",
       params: [{ chainId: "0x3" }], // chainId must be in hexadecimal numbers
     });
-
-    console.log(changeNetworkResponse);
 
     await this.setState({
       claimable: {
@@ -331,12 +328,15 @@ class App extends React.Component<any, any> {
             await wrappedTokenContract.balanceOf(receiverAddress)
           ),
           wrappedTokenContract,
+          fetching: true,
         });
-        // const approveTargetRouterTx = await wrappedTokenContract.approve(
-        //   targetRouterContract.address,
-        //   parseEther("1000")
-        // );
-        // await approveTargetRouterTx.wait();
+        const approveTargetRouterTx = await wrappedTokenContract.approve(
+          targetRouterContract.address,
+          parseEther("1000")
+        );
+        await approveTargetRouterTx.wait();
+
+        await this.setState({ fetching: false });
       }
     );
 
@@ -345,6 +345,7 @@ class App extends React.Component<any, any> {
       async (sender: string, amount: string, nativeTokenAddress: string) => {
         await this.setState({ fetching: true });
         console.log(nativeTokenAddress + "burned" + " - " + amount);
+        console.log("sender: " + sender);
 
         const parsedAmount = parseFloat(formatEther(amount));
 
@@ -370,14 +371,6 @@ class App extends React.Component<any, any> {
             chainId: 4,
           },
         });
-
-        const sourceRouterTokenContract = await this.state.sourceTokenContract.connect(this.state.sourceRouterContract.address)
-
-        const approveRouterTx = await sourceRouterTokenContract.approve(
-          sender,
-          parseEther("1000")
-        );
-        await approveRouterTx.wait();
 
         const updatedReleasableAmount = parseReleasableAmount + parsedAmount;
         const updatedWrappedBalance =
@@ -447,10 +440,29 @@ class App extends React.Component<any, any> {
   public async bridgeAmount(sourceInput: string) {
     console.log("bridge");
     const { sourceRouterContract, sourceTokenContract } = this.state;
-    console.log(sourceRouterContract);
+    console.log(this.state.chainConnection.address);
 
     try {
       await this.setState({ fetching: true });
+      const allowance = parseFloat(
+        formatEther(
+          await sourceTokenContract.allowance(
+            this.state.chainConnection.address,
+            sourceRouterContract.address
+          )
+        )
+      );
+      const parsedSourceInput = parseFloat(sourceInput);
+      console.log("allowance: " + allowance);
+      console.log("input: " + parsedSourceInput);
+      if (allowance < parsedSourceInput) {
+        await this.setState({ fetching: true });
+        const approveRouterTx = await sourceTokenContract.approve(
+          sourceRouterContract.address,
+          parseEther(`${parsedSourceInput}`)
+        );
+        await approveRouterTx.wait();
+      }
 
       const lockTx = await sourceRouterContract.lock(
         sourceTokenContract.address,
@@ -489,11 +501,30 @@ class App extends React.Component<any, any> {
   }
 
   public async burn(burnedInput: string) {
-    const { targetRouterContract } = this.state;
+    const { targetRouterContract, targetTokenContract } = this.state;
 
-    await this.setState({ fetching: true });
     console.log(this.state.sourceTokenContract);
     try {
+      await this.setState({ fetching: true });
+      const allowance = parseFloat(
+        formatEther(
+          await targetTokenContract.allowance(
+            this.state.chainConnection.address,
+            targetRouterContract.address
+          )
+        )
+      );
+      const parsedBurnedInput = parseFloat(burnedInput);
+      console.log("allowance: " + allowance);
+      console.log("input: " + parsedBurnedInput);
+      if (allowance < parsedBurnedInput) {
+        await this.setState({ fetching: true });
+        const approveRouterTx = await targetTokenContract.approve(
+          targetRouterContract.address,
+          parseEther(`${parsedBurnedInput}`)
+        );
+        await approveRouterTx.wait();
+      }
       const burnTx = await targetRouterContract.burn(
         this.state.wrappedTokenContract.address,
         this.state.sourceTokenContract.address,
@@ -588,6 +619,7 @@ class App extends React.Component<any, any> {
             chainConnData={this.state.chainConnection}
             killSession={() => this.resetApp(this.state.chainConnection)}
             wrappedBalance={this.state.wrappedBalance}
+            nativeBalance={this.state.nativeBalance}
           />
           <SContent>
             {fetching ? (
