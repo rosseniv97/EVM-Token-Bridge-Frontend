@@ -1,4 +1,3 @@
-import { Contract } from "ethers/lib/ethers";
 import Web3Modal from "web3modal";
 
 export interface IAssetData {
@@ -27,8 +26,5 @@ export interface IChainConn {
   library: any;
   chainId: number;
   address: string;
-  sourceRouterContract: Contract;
-  sourceTokenContract: Contract;
-  targetRouterContract: Contract;
   connected: boolean;
 }

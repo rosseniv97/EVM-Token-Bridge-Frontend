@@ -1,18 +1,18 @@
 export default {
     LMT_ROUTER: {
       network: "rinkeby",
-      address: "0x47B2A98bD310770678D5ED1B9aE2cD82608603c9"
+      address: "0xf00f0d2441ed0A4840520473638D0DcDe610Aa04"
     },
     LMT_TOKEN: {
       network: "rinkeby",
-      address: "0x8Ce3CBEC742860D02492C7E9D7399c0580e2762D"
+      address: "0xd2fc7A8663E54bA00d0a02Cac7165A0438ccCA91"
     },
     APT_ROUTER: {
       network: "ropsten",
-      address: "0x170F7b41755e7D98B12FB1E16628B9eDf2E5EE52"
+      address: "0xf00f0d2441ed0A4840520473638D0DcDe610Aa04"
     },
     APT_TOKEN: {
       network: "ropsten",
-      address: "0x87DDAeA8922cF7a61F26375ad61529cd2e6a83A7"
+      address: "0xd2fc7A8663E54bA00d0a02Cac7165A0438ccCA91"
     },
 };
