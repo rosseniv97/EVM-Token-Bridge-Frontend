@@ -12,6 +12,7 @@ export default (props: any) => {
     claimable,
     releasable,
     wrappedBalance,
+    chainId,
   } = props;
   const [input, setInput] = useState({
     sourceLockInput: "",
@@ -45,6 +46,10 @@ export default (props: any) => {
               />
               <ConnectButton
                 title="Release"
+                disabled={
+                  parseFloat(input.sourceReleaseInput) >
+                  parseFloat(releasable.amount.toString())
+                }
                 onClick={async () => {
                   await release(
                     input.sourceReleaseInput,
@@ -54,6 +59,9 @@ export default (props: any) => {
               />
             </>
           ) : (
+            <></>
+          )}
+          {chainId === 3 ? (
             <>
               <Input
                 name="wLime-field"
@@ -70,11 +78,17 @@ export default (props: any) => {
               />
               <ConnectButton
                 title="Burn"
+                disabled={
+                  parseFloat(input.burnedInput) >
+                  parseFloat(wrappedBalance.toString())
+                }
                 onClick={async () => {
                   await burn(input.burnedInput);
                 }}
               />
             </>
+          ) : (
+            <></>
           )}
         </>
       ) : (
@@ -103,12 +117,19 @@ export default (props: any) => {
           />
           <ConnectButton
             title="Claim"
+            disabled={
+              parseFloat(input.wrappedInput) >
+              parseFloat(claimable.amount.toString())
+            }
             onClick={async (e: Event) => {
               await claim(input.wrappedInput);
             }}
           />
         </>
       ) : (
+        <></>
+      )}
+      {chainId === 4 ? (
         <>
           <Input
             name="lime-field"
@@ -130,6 +151,8 @@ export default (props: any) => {
             }}
           />
         </>
+      ) : (
+        <></>
       )}
     </>
   );
