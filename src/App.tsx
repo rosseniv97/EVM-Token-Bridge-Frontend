@@ -72,7 +72,7 @@ interface IAppState {
   targetRouterContract: Contract;
   sourceRouterContract: Contract;
   sourceTokenContract: Contract;
-  wrappedTokenContract: Contract;
+  wrappedTokenContract: any;
   claimable: any;
   releasable: any;
   wrappedBalance: number;
@@ -98,10 +98,7 @@ const INITIAL_STATE: IAppState = {
   targetRouterContract: new Contract(contracts.APT_ROUTER.address, ROUTER.abi),
   sourceRouterContract: new Contract(contracts.LMT_ROUTER.address, ROUTER.abi),
   sourceTokenContract: new Contract(contracts.LMT_TOKEN.address, ROUTER.abi),
-  wrappedTokenContract: new Contract(
-    contracts.APT_TOKEN.address,
-    WRAPPED_TOKEN.abi
-  ),
+  wrappedTokenContract: null,
   sourceToTarget: {
     source: "lime",
     target: "apple",
@@ -209,13 +206,15 @@ class App extends React.Component<any, any> {
       address
     );
 
-    const nativeBalance = parseFloat(formatEther(
-      await sourceTokenContract.balanceOf(address)
-    ));
+    const nativeBalance = parseFloat(
+      formatEther(await sourceTokenContract.balanceOf(address))
+    );
 
-    const lockedAmount = parseFloat(formatEther(
-      await sourceTokenContract.balanceOf(sourceRouterContract.address)
-    ));
+    const lockedAmount = parseFloat(
+      formatEther(
+        await sourceTokenContract.balanceOf(sourceRouterContract.address)
+      )
+    );
 
     await this.setState({
       chainConnection: {
@@ -271,14 +270,21 @@ class App extends React.Component<any, any> {
         );
         const releasedAmount = parseFloat(formatEther(amount));
         const updatedLockedAmount = this.state.lockedAmount - releasedAmount;
-        const updatedReleasableAmount = this.state.lockedAmount - releasedAmount;
+        const updatedReleasableAmount =
+          this.state.releasable.amount - releasedAmount;
+        const updatedClaimableAmount =
+          this.state.claimable.amount - releasedAmount;
         await this.setState({
           nativeBalance,
           lockedAmount: updatedLockedAmount,
           releasable: {
             ...this.state.releasable,
-            amount: updatedReleasableAmount
-          }
+            amount: updatedReleasableAmount,
+          },
+          claimable: {
+            ...this.state.claimable,
+            amount: updatedClaimableAmount,
+          },
         });
       }
     );
@@ -286,7 +292,6 @@ class App extends React.Component<any, any> {
     await this.setState({ fetching: false });
 
     await this.subscribeToProviderEvents(this.state.chainConnection);
-
   };
 
   public connectToTarget = async () => {
@@ -335,7 +340,11 @@ class App extends React.Component<any, any> {
         )
       : null;
     const userWrappedBalance = wrappedTokenContract
-      ? formatEther(await wrappedTokenContract.balanceOf(this.state.chainConnection.address))
+      ? formatEther(
+          await wrappedTokenContract.balanceOf(
+            this.state.chainConnection.address
+          )
+        )
       : "0";
 
     targetRouterContract.on(
@@ -345,7 +354,6 @@ class App extends React.Component<any, any> {
         amount: string,
         wrappedTokenAddress: string
       ) => {
-        
         const wrappedTokenContract = getContract(
           wrappedTokenAddress,
           WRAPPED_TOKEN.abi,
@@ -481,7 +489,7 @@ class App extends React.Component<any, any> {
       );
       const allowance = parseFloat(formatEther(bigNumberAllowance));
       const parsedSourceInput = parseFloat(sourceInput);
-      
+
       if (allowance < parsedSourceInput) {
         await this.setState({ fetching: true });
         const approveRouterTx = await sourceTokenContract.approve(
@@ -516,7 +524,6 @@ class App extends React.Component<any, any> {
         parseEther(wrappedInput)
       );
       await claimTx.wait();
-
     } catch (e) {
       console.log(e);
       await this.setState({ fetching: false });
@@ -677,15 +684,25 @@ class App extends React.Component<any, any> {
                     ) => await this.release(releasedInput, receivingAddress)}
                     claimable={this.state.claimable}
                     wrappedBalance={this.state.wrappedBalance}
+                    wrappedTokenExists={this.state.wrappedTokenContract !== null}
                     releasable={this.state.releasable}
                     chainId={this.state.chainConnection.chainId}
                   />
                 )}
-                {!this.state.claimable.connected &&
+                {this.state.chainConnection.chainId !== 3 &&
                 this.state.claimable.amount ? (
                   <ConnectButton
                     title="Connect to Target Chain"
                     onClick={async () => this.connectToTarget()}
+                  />
+                ) : (
+                  <></>
+                )}
+                {this.state.chainConnection.chainId !== 4 &&
+                this.state.releasable.amount ? (
+                  <ConnectButton
+                    title="Connect to Native Chain"
+                    onClick={async () => this.onConnect()}
                   />
                 ) : (
                   <></>

@@ -12,6 +12,7 @@ export default (props: any) => {
     claimable,
     releasable,
     wrappedBalance,
+    wrappedTokenExists,
     chainId,
   } = props;
   const [input, setInput] = useState({
@@ -23,79 +24,37 @@ export default (props: any) => {
 
   return (
     <>
-      {wrappedBalance > 0 ? (
+      {wrappedBalance > 0 && chainId === 3 && wrappedTokenExists ? (
         <>
-          {releasable.amount ? (
-            <>
-              <Input
-                name="lime-release-field"
-                placeholder="LMT Amount"
-                value={input.sourceReleaseInput}
-                onChange={async (e) => {
-                  // const maxClaimableAmount = claimable.amount;
-                  // if (parseFloat(e.target.value) > claimable.amount) {
-                  //   e.target.value = maxClaimableAmount.toString();
-                  // }
-                  if (parseInt(e.target.value, 10) || e.target.value === "") {
-                    setInput({
-                      ...input,
-                      sourceReleaseInput: e.target.value,
-                    });
-                  }
-                }}
-              />
-              <ConnectButton
-                title="Release"
-                disabled={
-                  parseFloat(input.sourceReleaseInput) >
-                  parseFloat(releasable.amount.toString())
-                }
-                onClick={async () => {
-                  await release(
-                    input.sourceReleaseInput,
-                    releasable.receivingAddress
-                  );
-                }}
-              />
-            </>
-          ) : (
-            <></>
-          )}
-          {chainId === 3 ? (
-            <>
-              <Input
-                name="wLime-field"
-                value={input.burnedInput}
-                placeholder="wLMT Amount"
-                onChange={async (e) => {
-                  if (parseInt(e.target.value, 10) || e.target.value === "") {
-                    setInput({
-                      ...input,
-                      burnedInput: e.target.value,
-                    });
-                  }
-                }}
-              />
-              <ConnectButton
-                title="Burn"
-                disabled={
-                  parseFloat(input.burnedInput) >
-                  parseFloat(wrappedBalance.toString())
-                }
-                onClick={async () => {
-                  await burn(input.burnedInput);
-                }}
-              />
-            </>
-          ) : (
-            <></>
-          )}
+          <Input
+            name="wLime-field"
+            value={input.burnedInput}
+            placeholder="wLMT Amount"
+            onChange={async (e) => {
+              if (parseInt(e.target.value, 10) || e.target.value === "") {
+                setInput({
+                  ...input,
+                  burnedInput: e.target.value,
+                });
+              }
+            }}
+          />
+          <ConnectButton
+            title="Burn"
+            disabled={
+              parseFloat(input.burnedInput) >
+                parseFloat(wrappedBalance.toString()) || !input.burnedInput
+            }
+            onClick={async () => {
+              await burn(input.burnedInput);
+            }}
+          />
         </>
       ) : (
         <></>
       )}
 
-      {claimable.amount > 0 && claimable.connected ? (
+      {claimable.amount > 0 && chainId === 3 ? (
         <>
           <Input
             disabled={!claimable.amount}
@@ -119,7 +78,7 @@ export default (props: any) => {
             title="Claim"
             disabled={
               parseFloat(input.wrappedInput) >
-              parseFloat(claimable.amount.toString())
+                parseFloat(claimable.amount.toString()) || !input.wrappedInput
             }
             onClick={async (e: Event) => {
               await claim(input.wrappedInput);
@@ -146,10 +105,48 @@ export default (props: any) => {
           />
           <ConnectButton
             title="Swap"
+            disabled={!input.sourceLockInput}
             onClick={async (e: Event) => {
               await bridgeAmount(input.sourceLockInput);
             }}
           />
+          {releasable.amount > 0 ? (
+            <>
+              <Input
+                name="lime-release-field"
+                placeholder="LMT Amount"
+                value={input.sourceReleaseInput}
+                onChange={async (e) => {
+                  // const maxClaimableAmount = claimable.amount;
+                  // if (parseFloat(e.target.value) > claimable.amount) {
+                  //   e.target.value = maxClaimableAmount.toString();
+                  // }
+                  if (parseInt(e.target.value, 10) || e.target.value === "") {
+                    setInput({
+                      ...input,
+                      sourceReleaseInput: e.target.value,
+                    });
+                  }
+                }}
+              />
+              <ConnectButton
+                title="Release"
+                disabled={
+                  parseFloat(input.sourceReleaseInput) >
+                    parseFloat(releasable.amount.toString()) ||
+                  !input.sourceReleaseInput
+                }
+                onClick={async () => {
+                  await release(
+                    input.sourceReleaseInput,
+                    releasable.receivingAddress
+                  );
+                }}
+              />
+            </>
+          ) : (
+            <></>
+          )}
         </>
       ) : (
         <></>
