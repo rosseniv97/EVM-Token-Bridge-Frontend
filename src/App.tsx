@@ -240,9 +240,7 @@ class App extends React.Component<any, any> {
           sourceTokenAddress
         );
         const lockedAmount = parseFloat(formatEther(userLockedAmount));
-        const claimableAmount =
-          parseFloat(formatEther(userLockedAmount)) +
-          parseFloat(this.state.claimable.amount.toString());
+        const claimableAmount = lockedAmount - this.state.wrappedBalance
         const nativeBalance = formatEther(
           await sourceTokenContract.balanceOf(senderAddress)
         );
@@ -272,8 +270,7 @@ class App extends React.Component<any, any> {
         const updatedLockedAmount = this.state.lockedAmount - releasedAmount;
         const updatedReleasableAmount =
           this.state.releasable.amount - releasedAmount;
-        const updatedClaimableAmount =
-          this.state.claimable.amount - releasedAmount;
+        const updatedClaimableAmount = updatedLockedAmount - this.state.wrappedBalance;
         await this.setState({
           nativeBalance,
           lockedAmount: updatedLockedAmount,
@@ -283,8 +280,8 @@ class App extends React.Component<any, any> {
           },
           claimable: {
             ...this.state.claimable,
-            amount: updatedClaimableAmount,
-          },
+            amount: updatedClaimableAmount
+          }
         });
       }
     );
@@ -415,6 +412,8 @@ class App extends React.Component<any, any> {
         const updatedReleasableAmount = parseReleasableAmount + parsedAmount;
         const updatedWrappedBalance =
           parseFloat(this.state.wrappedBalance) - parsedAmount;
+          const updatedClaimableBalance =
+          parseFloat(this.state.lockedAmount) - updatedWrappedBalance;  
         await this.setState({
           releasable: {
             amount: updatedReleasableAmount,
@@ -422,6 +421,7 @@ class App extends React.Component<any, any> {
           },
           claimable: {
             ...this.state.claimable,
+            amount: updatedClaimableBalance,
             connected: false,
           },
           wrappedBalance: updatedWrappedBalance,
@@ -684,7 +684,9 @@ class App extends React.Component<any, any> {
                     ) => await this.release(releasedInput, receivingAddress)}
                     claimable={this.state.claimable}
                     wrappedBalance={this.state.wrappedBalance}
-                    wrappedTokenExists={this.state.wrappedTokenContract !== null}
+                    wrappedTokenExists={
+                      this.state.wrappedTokenContract !== null
+                    }
                     releasable={this.state.releasable}
                     chainId={this.state.chainConnection.chainId}
                   />
