@@ -77,6 +77,7 @@ interface IAppState {
   releasable: any;
   wrappedBalance: number;
   nativeBalance: number;
+  lockedAmount: number;
   sourceInput: string;
   result: any | null;
   info: any | null;
@@ -116,6 +117,7 @@ const INITIAL_STATE: IAppState = {
   },
   wrappedBalance: 0,
   nativeBalance: 0,
+  lockedAmount: 0,
   sourceInput: "",
   result: null,
   info: null,
@@ -155,8 +157,6 @@ class App extends React.Component<any, any> {
 
     const library = new Web3Provider(provider, "any");
 
-    const network = await library.getNetwork();
-
     try {
       await window.ethereum.request({
         method: "wallet_switchEthereumChain",
@@ -167,6 +167,8 @@ class App extends React.Component<any, any> {
       await this.setState({ fetching: false });
       return;
     }
+
+    const network = await library.getNetwork();
 
     const address = provider.selectedAddress
       ? provider?.selectedAddress
@@ -207,9 +209,13 @@ class App extends React.Component<any, any> {
       address
     );
 
-    const nativeBalance = formatEther(
+    const nativeBalance = parseFloat(formatEther(
       await sourceTokenContract.balanceOf(address)
-    );
+    ));
+
+    const lockedAmount = parseFloat(formatEther(
+      await sourceTokenContract.balanceOf(sourceRouterContract.address)
+    ));
 
     await this.setState({
       chainConnection: {
@@ -221,6 +227,7 @@ class App extends React.Component<any, any> {
         connected: true,
       },
       nativeBalance,
+      lockedAmount,
       sourceRouterContract,
       sourceTokenContract,
     });
@@ -228,23 +235,30 @@ class App extends React.Component<any, any> {
     sourceRouterContract.on(
       "TokenLocked",
       async (senderAddress, amount, tokenContractAddress) => {
+        await this.setState({ fetching: true });
         const userLockedAmount = await sourceRouterContract.userToLocked(
           senderAddress,
           sourceTokenAddress
         );
+        const lockedAmount = parseFloat(formatEther(userLockedAmount));
+        const claimableAmount =
+          parseFloat(formatEther(userLockedAmount)) +
+          parseFloat(this.state.claimable.amount.toString());
         const nativeBalance = formatEther(
           await sourceTokenContract.balanceOf(senderAddress)
         );
         await this.setState({
           claimable: {
             ...this.state.claimable,
-            amount: formatEther(userLockedAmount),
+            amount: claimableAmount,
             receivingAddress: senderAddress,
           },
           chainConnection: {
             ...this.state.chainConnection,
           },
           nativeBalance,
+          lockedAmount,
+          fetching: false,
         });
       }
     );
@@ -252,11 +266,19 @@ class App extends React.Component<any, any> {
     sourceRouterContract.on(
       "TokenReleased",
       async (receiverAddress, tokenContractAddress, amount) => {
-        const nativeBalance = await sourceTokenContract.balanceOf(
-          receiverAddress
+        const nativeBalance = formatEther(
+          await sourceTokenContract.balanceOf(receiverAddress)
         );
+        const releasedAmount = parseFloat(formatEther(amount));
+        const updatedLockedAmount = this.state.lockedAmount - releasedAmount;
+        const updatedReleasableAmount = this.state.lockedAmount - releasedAmount;
         await this.setState({
           nativeBalance,
+          lockedAmount: updatedLockedAmount,
+          releasable: {
+            ...this.state.releasable,
+            amount: updatedReleasableAmount
+          }
         });
       }
     );
@@ -264,6 +286,7 @@ class App extends React.Component<any, any> {
     await this.setState({ fetching: false });
 
     await this.subscribeToProviderEvents(this.state.chainConnection);
+
   };
 
   public connectToTarget = async () => {
@@ -299,6 +322,22 @@ class App extends React.Component<any, any> {
       this.state.chainConnection.address
     );
 
+    const userWrappedTokenAddress = await targetRouterContract.nativeToWrapped(
+      this.state.sourceTokenContract.address
+    );
+
+    const wrappedTokenContract = parseInt(userWrappedTokenAddress, 16)
+      ? getContract(
+          userWrappedTokenAddress,
+          WRAPPED_TOKEN.abi,
+          this.state.chainConnection.library,
+          this.state.chainConnection.address
+        )
+      : null;
+    const userWrappedBalance = wrappedTokenContract
+      ? formatEther(await wrappedTokenContract.balanceOf(this.state.chainConnection.address))
+      : "0";
+
     targetRouterContract.on(
       "TokenClaimed",
       async (
@@ -306,7 +345,7 @@ class App extends React.Component<any, any> {
         amount: string,
         wrappedTokenAddress: string
       ) => {
-        console.log(wrappedTokenAddress + " - " + amount);
+        
         const wrappedTokenContract = getContract(
           wrappedTokenAddress,
           WRAPPED_TOKEN.abi,
@@ -330,11 +369,6 @@ class App extends React.Component<any, any> {
           wrappedTokenContract,
           fetching: true,
         });
-        const approveTargetRouterTx = await wrappedTokenContract.approve(
-          targetRouterContract.address,
-          parseEther("1000")
-        );
-        await approveTargetRouterTx.wait();
 
         await this.setState({ fetching: false });
       }
@@ -344,8 +378,6 @@ class App extends React.Component<any, any> {
       "TokenBurned",
       async (sender: string, amount: string, nativeTokenAddress: string) => {
         await this.setState({ fetching: true });
-        console.log(nativeTokenAddress + "burned" + " - " + amount);
-        console.log("sender: " + sender);
 
         const parsedAmount = parseFloat(formatEther(amount));
 
@@ -395,6 +427,7 @@ class App extends React.Component<any, any> {
         ...this.state.claimable,
         connected: true,
       },
+      wrappedBalance: userWrappedBalance,
       fetching: false,
     });
   };
@@ -438,23 +471,17 @@ class App extends React.Component<any, any> {
   }
 
   public async bridgeAmount(sourceInput: string) {
-    console.log("bridge");
     const { sourceRouterContract, sourceTokenContract } = this.state;
-    console.log(this.state.chainConnection.address);
 
     try {
       await this.setState({ fetching: true });
-      const allowance = parseFloat(
-        formatEther(
-          await sourceTokenContract.allowance(
-            this.state.chainConnection.address,
-            sourceRouterContract.address
-          )
-        )
+      const bigNumberAllowance = await sourceTokenContract.allowance(
+        this.state.chainConnection.address,
+        sourceRouterContract.address
       );
+      const allowance = parseFloat(formatEther(bigNumberAllowance));
       const parsedSourceInput = parseFloat(sourceInput);
-      console.log("allowance: " + allowance);
-      console.log("input: " + parsedSourceInput);
+      
       if (allowance < parsedSourceInput) {
         await this.setState({ fetching: true });
         const approveRouterTx = await sourceTokenContract.approve(
@@ -480,9 +507,8 @@ class App extends React.Component<any, any> {
 
   public async claim(wrappedInput: string) {
     const { targetRouterContract } = this.state;
-
     await this.setState({ fetching: true });
-    console.log(targetRouterContract);
+
     try {
       const claimTx = await targetRouterContract.claim(
         this.state.claimable.receivingAddress,
@@ -490,7 +516,7 @@ class App extends React.Component<any, any> {
         parseEther(wrappedInput)
       );
       await claimTx.wait();
-      console.log(this.state.claimable.receivingAddress);
+
     } catch (e) {
       console.log(e);
       await this.setState({ fetching: false });
@@ -501,25 +527,23 @@ class App extends React.Component<any, any> {
   }
 
   public async burn(burnedInput: string) {
-    const { targetRouterContract, targetTokenContract } = this.state;
+    const { targetRouterContract, wrappedTokenContract } = this.state;
 
-    console.log(this.state.sourceTokenContract);
     try {
       await this.setState({ fetching: true });
       const allowance = parseFloat(
         formatEther(
-          await targetTokenContract.allowance(
+          await wrappedTokenContract.allowance(
             this.state.chainConnection.address,
             targetRouterContract.address
           )
         )
       );
       const parsedBurnedInput = parseFloat(burnedInput);
-      console.log("allowance: " + allowance);
-      console.log("input: " + parsedBurnedInput);
+
       if (allowance < parsedBurnedInput) {
         await this.setState({ fetching: true });
-        const approveRouterTx = await targetTokenContract.approve(
+        const approveRouterTx = await wrappedTokenContract.approve(
           targetRouterContract.address,
           parseEther(`${parsedBurnedInput}`)
         );
@@ -541,9 +565,7 @@ class App extends React.Component<any, any> {
   }
 
   public async release(sourceInput: string, receiverAddress: string) {
-    console.log("release");
     const { sourceRouterContract, sourceTokenContract } = this.state;
-    console.log(sourceRouterContract);
 
     try {
       await this.setState({ fetching: true });
@@ -620,6 +642,7 @@ class App extends React.Component<any, any> {
             killSession={() => this.resetApp(this.state.chainConnection)}
             wrappedBalance={this.state.wrappedBalance}
             nativeBalance={this.state.nativeBalance}
+            lockedAmount={this.state.lockedAmount}
           />
           <SContent>
             {fetching ? (
@@ -655,6 +678,7 @@ class App extends React.Component<any, any> {
                     claimable={this.state.claimable}
                     wrappedBalance={this.state.wrappedBalance}
                     releasable={this.state.releasable}
+                    chainId={this.state.chainConnection.chainId}
                   />
                 )}
                 {!this.state.claimable.connected &&
